@@ -36,26 +36,39 @@ FEATURE_COLS = [
 _xgb_model = None
 _clf_model = None
 _load_error: Optional[str] = None
+_model_lock = threading.Lock()
+
+
+def _normalize_timestamp(ts: Optional[datetime]) -> datetime:
+    """Ensures timestamp is consistently offset-aware in Asia/Kolkata timezone."""
+    if ts is None:
+        return datetime.now(_IST)
+    if ts.tzinfo is None:
+        return ts.replace(tzinfo=_IST)
+    return ts.astimezone(_IST)
 
 
 def _load_models():
     global _xgb_model, _clf_model, _load_error
     if _xgb_model is not None:
         return True
-    try:
-        xgb_path = Path("artifacts/pipelines/xgb_multi_horizon.joblib")
-        clf_path = Path("artifacts/pipelines/saturation_classifier.joblib")
-        if not xgb_path.exists() or not clf_path.exists():
-            _load_error = f"Model artifacts not found at {xgb_path} or {clf_path}"
+    with _model_lock:
+        if _xgb_model is not None:
+            return True
+        try:
+            xgb_path = Path("artifacts/pipelines/xgb_multi_horizon.joblib")
+            clf_path = Path("artifacts/pipelines/saturation_classifier.joblib")
+            if not xgb_path.exists() or not clf_path.exists():
+                _load_error = f"Model artifacts not found at {xgb_path} or {clf_path}"
+                return False
+            _xgb_model = joblib.load(xgb_path)
+            _clf_model = joblib.load(clf_path)
+            logger.info("XGBoost forecaster and saturation classifier loaded.")
+            return True
+        except Exception as e:
+            _load_error = str(e)
+            logger.error(f"Failed to load ML models: {e}")
             return False
-        _xgb_model = joblib.load(xgb_path)
-        _clf_model = joblib.load(clf_path)
-        logger.info("XGBoost forecaster and saturation classifier loaded.")
-        return True
-    except Exception as e:
-        _load_error = str(e)
-        logger.error(f"Failed to load ML models: {e}")
-        return False
 
 
 def models_ready() -> Dict[str, Any]:
@@ -75,16 +88,21 @@ class _TemporalRingBuffer:
         self._lock = threading.Lock()
 
     def record_observation(self, zone_id: str, count: int, timestamp: Optional[datetime] = None):
-        if timestamp is None:
-            timestamp = datetime.now(_IST)
+        ts = _normalize_timestamp(timestamp)
         with self._lock:
             if zone_id not in self._buffers:
                 self._buffers[zone_id] = deque(maxlen=self._maxlen)
-            self._buffers[zone_id].append((timestamp, int(count)))
+            buf = self._buffers[zone_id]
+            # Debounce sub-minute rapid polling: update latest slot if < 45 seconds elapsed
+            if buf:
+                last_time, _ = buf[-1]
+                if abs((ts - last_time).total_seconds()) < 45:
+                    buf[-1] = (ts, int(count))
+                    return
+            buf.append((ts, int(count)))
 
     def get_lags(self, zone_id: str, current_count: int, timestamp: Optional[datetime] = None) -> Dict[str, int]:
-        if timestamp is None:
-            timestamp = datetime.now(_IST)
+        ts = _normalize_timestamp(timestamp)
         with self._lock:
             buf = self._buffers.get(zone_id)
             if not buf or len(buf) < 2:
@@ -99,11 +117,12 @@ class _TemporalRingBuffer:
             history = list(buf)
 
             def find_lag(offset_minutes: int) -> int:
-                target_time = timestamp - timedelta(minutes=offset_minutes)
+                target_time = ts - timedelta(minutes=offset_minutes)
                 best_diff = float("inf")
                 best_val = current_count
                 for t, c in history:
-                    diff = abs((t - target_time).total_seconds())
+                    t_norm = _normalize_timestamp(t)
+                    diff = abs((t_norm - target_time).total_seconds())
                     if diff < best_diff:
                         best_diff = diff
                         best_val = c
@@ -119,13 +138,19 @@ class _TemporalRingBuffer:
     def is_stream_frozen(self, zone_id: str) -> bool:
         """
         Detects camera/video ingest freeze (e.g. frozen CCTV stream):
-        returns True if the last 6 consecutive readings are identical and non-empty.
+        returns True if the last 6 consecutive readings are identical, non-empty,
+        and span at least 10 minutes (eliminates rapid-poll false positives).
         """
         with self._lock:
             buf = self._buffers.get(zone_id)
             if not buf or len(buf) < 6:
                 return False
-            last_counts = [c for _, c in list(buf)[-6:]]
+            last_6 = list(buf)[-6:]
+            time_span = abs((last_6[-1][0] - last_6[0][0]).total_seconds())
+            if time_span < 600:
+                # Need at least 10 minutes of unchanging data
+                return False
+            last_counts = [c for _, c in last_6]
             return len(set(last_counts)) == 1
 
 _ring_buffer = _TemporalRingBuffer()
@@ -244,7 +269,8 @@ def predict_zone(
             is_exam_day, is_class_transition, timestamp, lag_counts
         )
         preds = _xgb_model.predict(X)
-        pred_count = int(max(0, min(operational_capacity * 1.20, round(preds[h_key][0]))))
+        max_bound = max(current_count, int(operational_capacity * 1.30))
+        pred_count = int(max(0, min(max_bound, round(preds[h_key][0]))))
         sat_proba  = float(_clf_model.predict_proba(X)[0])
         source     = "xgboost_model"
 

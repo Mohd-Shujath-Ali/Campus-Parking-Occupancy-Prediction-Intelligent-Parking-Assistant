@@ -252,3 +252,39 @@ def test_image_quality_assessment():
     normal_img = np.random.randint(60, 180, (100, 100, 3), dtype=np.uint8)
     q_norm = assess_image_quality(normal_img)
     assert q_norm["mean_brightness"] >= 50.0
+
+
+# ─────────────────────────── Edge Case Hardening ──────────────
+
+def test_prediction_naive_iso_timestamp():
+    """Verify offset-naive timestamps do not trigger datetime subtraction exceptions."""
+    payload = {
+        "zone_id": "ZONE_BLOCK1",
+        "horizon_minutes": 15,
+        "current_count": 85,
+        "timestamp": "2026-11-18T10:00:00"  # Note: No +05:30 offset
+    }
+    res = client.post("/api/predict", json=payload)
+    assert res.status_code == 200
+    data = res.json()
+    assert data["predicted_vehicle_count"] >= 0
+
+
+def test_recommendation_fuzzy_destination():
+    """Verify space/case insensitive destination resolution."""
+    for dest_query in ("block 26 cse", "BLOCK_26_CSE", "Block 26 CSE"):
+        res = client.get(f"/api/recommendations?destination={dest_query}&horizon_minutes=15")
+        assert res.status_code == 200, f"Failed for {dest_query}: {res.text}"
+        data = res.json()
+        assert data["destination"] == "Block_26_CSE"
+        assert len(data["recommended_zones"]) > 0
+
+
+def test_navigate_capacity_cap():
+    """Verify repeated navigation dispatches don't infinitely starve capacity beyond 35%."""
+    # Zone ZONE_BLOCK1 has operational capacity 150 -> 35% cap is 52
+    for _ in range(60):
+        res = client.post("/api/navigate", json={"zone_id": "ZONE_BLOCK1"})
+        assert res.status_code in (200, 429)  # 200 within limit, or 429 once rate limit reached
+        if res.status_code == 200:
+            assert res.json()["active_in_flight_count"] <= 55

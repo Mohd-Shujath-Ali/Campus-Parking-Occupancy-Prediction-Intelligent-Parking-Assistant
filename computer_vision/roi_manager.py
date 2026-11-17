@@ -24,7 +24,7 @@ class ROIManager:
         """
         x1, y1, x2, y2 = bbox[:4]
         contact_x = (x1 + x2) / 2.0
-        contact_y = y2
+        contact_y = max(y1, y2)
         return contact_x, contact_y
 
     def is_inside_roi(self, contact_point: Tuple[float, float]) -> bool:

@@ -15,13 +15,15 @@ class InFlightDispatchTracker:
         self._dispatches: Dict[str, List[float]] = {}
         self._lock = threading.Lock()
 
-    def record_dispatch(self, zone_id: str) -> int:
+    def record_dispatch(self, zone_id: str, max_capacity: int = 150) -> int:
         now = time.time()
         with self._lock:
             if zone_id not in self._dispatches:
                 self._dispatches[zone_id] = []
-            self._dispatches[zone_id].append(now)
             active = [t for t in self._dispatches[zone_id] if t > (now - self.ttl_seconds)]
+            # Edge-case safety cap: maximum active in-flight buffer is 35% of lot capacity
+            if len(active) < max(5, int(max_capacity * 0.35)):
+                active.append(now)
             self._dispatches[zone_id] = active
             return len(active)
 
@@ -74,8 +76,11 @@ class ParkingRanker:
             sat_prob = pred.get("saturation_prob", 0.0)
             cam_age = pred.get("camera_age_seconds", 30.0)
 
-            # Retrieve walking distance to destination
-            dist = z_meta.get("walking_distances_meters", {}).get(destination, 600.0)
+            # Retrieve walking distance to destination (with case-insensitive / space tolerance)
+            dest_distances = z_meta.get("walking_distances_meters", {})
+            dest_map = {k.lower().replace(" ", "_"): v for k, v in dest_distances.items()}
+            norm_dest = destination.strip().lower().replace(" ", "_")
+            dist = dest_map.get(norm_dest, dest_distances.get(destination, 600.0))
             walk_time_mins = round(dist / 80.0, 1) # ~80m/min walking speed
 
             # Multi-criteria scoring
@@ -90,6 +95,8 @@ class ParkingRanker:
                 self.weights["freshness_penalty_weight"] * freshness_penalty -
                 saturation_risk_penalty
             )
+            # Edge-case clamp: keep score positive for display elegance
+            bounded_score = round(max(0.01, float(total_score)), 4)
 
             status = "AVAILABLE" if occ_rate < 0.75 else "FILLING_FAST" if occ_rate < 0.90 else "SATURATED"
 
@@ -97,7 +104,7 @@ class ParkingRanker:
                 "zone_id": z_id,
                 "name": z_meta["name"],
                 "category": z_meta["category"],
-                "score": round(float(total_score), 4),
+                "score": bounded_score,
                 "predicted_count": pred_count,
                 "operational_capacity": cap,
                 "available_spaces": avail_spaces,

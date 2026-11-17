@@ -108,6 +108,10 @@ def predict_occupancy(req: PredictionRequest):
     if req.timestamp:
         try:
             ts = datetime.fromisoformat(req.timestamp)
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=_IST)
+            else:
+                ts = ts.astimezone(_IST)
         except ValueError:
             raise HTTPException(status_code=422, detail="timestamp must be ISO 8601 format.")
 
@@ -150,10 +154,15 @@ def get_recommendations(
     is_exam_day: bool = Query(False),
     is_class_transition: bool = Query(False),
 ):
-    if destination not in _get_valid_destinations():
+    valid_dests = _get_valid_destinations()
+    norm_map = {d.lower().replace(" ", "_"): d for d in valid_dests}
+    req_norm = destination.strip().lower().replace(" ", "_")
+    if req_norm in norm_map:
+        destination = norm_map[req_norm]
+    elif destination not in valid_dests:
         raise HTTPException(
             status_code=404,
-            detail=f"Unknown destination '{destination}'. Valid: {_get_valid_destinations()}"
+            detail=f"Unknown destination '{destination}'. Valid: {valid_dests}"
         )
 
     now = datetime.now(_IST)
@@ -205,14 +214,16 @@ def _get_valid_destinations():
 # ---------------------------------------------------------------------------
 
 @router.post("/navigate")
-def record_driver_navigation(req: NavigateRequest):
+@limiter.limit("30/minute")
+def record_driver_navigation(request: Request, req: NavigateRequest):
     """
     Registers a driver dispatching towards a specific parking zone.
     Updates the InFlightDispatchTracker to proactively prevent congestion herd collapse.
     """
     if req.zone_id not in ZONES_MAP:
         raise HTTPException(status_code=404, detail="Zone not found.")
-    active_count = ranker.dispatch_tracker.record_dispatch(req.zone_id)
+    cap = ZONES_MAP[req.zone_id]["operational_capacity"]
+    active_count = ranker.dispatch_tracker.record_dispatch(req.zone_id, max_capacity=cap)
     return {
         "status": "DISPATCH_REGISTERED",
         "zone_id": req.zone_id,

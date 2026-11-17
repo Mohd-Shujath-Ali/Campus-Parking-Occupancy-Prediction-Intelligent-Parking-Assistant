@@ -18,6 +18,8 @@ items = [
     "notebooks/02_model_training_and_tuning.ipynb",
     "recommendation/parking_ranker.py",
     "computer_vision/detection.py",
+    "computer_vision/roi_manager.py",
+    "computer_vision/occupancy_counter.py",
     "api/limiter.py",
     "api/schemas.py",
     "api/routes.py",
@@ -31,6 +33,7 @@ items = [
     "frontend/static/js/driver.js",
     "frontend/static/js/admin.js",
     "tests/test_api.py",
+    "tests/test_multi_camera_roi.py",
     "artifacts/model_comparison.csv",
     "artifacts/pipelines",
     "artifacts/figures"
