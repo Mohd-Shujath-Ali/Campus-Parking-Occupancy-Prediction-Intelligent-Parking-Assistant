@@ -168,7 +168,8 @@ Analyzing occupancy spike velocities during the 5 scheduled LPU class transition
 
     code_cell("""surge_data = df[df['zone_id'] == 'ZONE_BLOCK1']
 fig, ax = plt.subplots(figsize=(10, 5))
-sns.boxplot(x='is_class_transition', y='vehicle_count', data=surge_data, palette=['#94a3b8', '#ea580c'], ax=ax)
+sns.boxplot(x='is_class_transition', y='vehicle_count', hue='is_class_transition', data=surge_data, palette=['#94a3b8', '#ea580c'], legend=False, ax=ax)
+ax.set_xticks([0, 1])
 ax.set_xticklabels(['Regular Interval', 'Class Transition Bell Window (±15 min)'])
 ax.set_title("Occupancy Distribution During Class Transition Surges (Block 1)", fontweight='bold')
 ax.set_ylabel("Occupancy Count")
@@ -179,8 +180,8 @@ plt.show()"""),
 Comparing regular instructional days against mid-term examination week inflow."""),
 
     code_cell("""fig, ax = plt.subplots(figsize=(10, 5))
-sns.kdeplot(data=df[df['is_exam_day'] == 0]['vehicle_count'], label='Regular Semester Day', shade=True, color='#3b82f6')
-sns.kdeplot(data=df[df['is_exam_day'] == 1]['vehicle_count'], label='Mid-Term Exam Day', shade=True, color='#ef4444')
+sns.kdeplot(data=df[df['is_exam_day'] == 0]['vehicle_count'], label='Regular Semester Day', fill=True, color='#3b82f6')
+sns.kdeplot(data=df[df['is_exam_day'] == 1]['vehicle_count'], label='Mid-Term Exam Day', fill=True, color='#ef4444')
 ax.set_title("Occupancy Density Shift: Regular Days vs. Exam Session Periods", fontweight='bold')
 ax.set_xlabel("Occupancy (Vehicles)")
 ax.legend()
