@@ -1,11 +1,12 @@
 # Campus Parking Occupancy Prediction & Intelligent Parking Assistant (Project 32)
-## School of Computing & Artificial Intelligence — Lovely Professional University (LPU)
+## School of Computer Science & Engineering — Lovely Professional University (LPU)
 
 [![Python](https://img.shields.io/badge/Python-3.12%20%7C%203.14-blue.svg)](https://www.python.org/)
 [![Ultralytics](https://img.shields.io/badge/YOLO-v8%20%2F%20v26-orange.svg)](https://ultralytics.com)
 [![FastAPI](https://img.shields.io/badge/FastAPI-v0.115-009688.svg)](https://fastapi.tiangolo.com)
 [![HTML5/Tailwind](https://img.shields.io/badge/Frontend-HTML5%20%7C%20TailwindCSS%20%7C%20Chart.js-38B2AC.svg)](https://tailwindcss.com)
 [![XGBoost](https://img.shields.io/badge/XGBoost-v2.1-red.svg)](https://xgboost.readthedocs.io/)
+[![SHAP](https://img.shields.io/badge/Explainability-TreeSHAP-brightgreen.svg)](https://shap.readthedocs.io/)
 
 ---
 
@@ -14,12 +15,14 @@
 This project delivers an end-to-end Machine Learning, Computer Vision, and Decision Support system for parking management across the 600-acre Lovely Professional University (LPU) campus in Phagwara, Punjab.
 
 Unlike traditional marked-stall sensor systems, this architecture addresses **open, unstructured campus grounds** using:
-1. **Perception**: Fine-tuned YOLO (`best.pt`) with Ground-Contact Point Jordan Ray-Casting Point-in-Polygon (PIP) and cross-camera Global Spatial NMS ($d < 2.5\text{m}$).
-2. **Zero-Leakage Time-Series Pipeline**: Multi-horizon forecasting ($+15, +30, +60$ min) combining continuous $\sin/\cos$ harmonic time, causal lags ($t-15, t-30, t-45, t-60$), shifted rolling demand velocity, and university lecture bell surge indicators.
-3. **Dual-Head Architecture**: Direct XGBoost Regressor paired with a SMOTE-balanced Saturation Classifier ($P(\text{Occ} \ge 90\%)$).
-4. **Inflection-Hour Evaluation**: Proves XGBoost outperforms persistence baselines by $>40\%$ during critical $\pm 15$ minute class transitions.
-5. **Anti-Herding Dispatcher**: Recommendation ranker with Softmax traffic dispersion to prevent sudden driver stampedes to the same parking ground.
-6. **Full-Stack Web Microservice**: High-performance asynchronous **FastAPI** backend with unified responsive **TailwindCSS & Chart.js** web interface (no Streamlit).
+1. **Perception**: Fine-tuned YOLO (`best.pt`, mAP50=91.6%) and Pretrained YOLO (`yolo26l.pt`) with Ground-Contact Point Jordan Ray-Casting Point-in-Polygon (PIP), cross-camera Global Spatial NMS ($d < 2.5\text{m}$), and OpenCV pre-inference quality diagnostics (blur, underexposure, glare).
+2. **Zero-Leakage Time-Series Pipeline**: Multi-horizon forecasting ($+15, +30, +60$ min) combining continuous $\sin/\cos$ harmonic time, causal lags ($t-15, t-30, t-45, t-60$), shifted rolling demand velocity, and academic bell surge indicators, isolated across chronological partitions (70% Train, 15% Val, 15% Holdout Test with a 1-hour purge buffer).
+3. **Multi-Model Comparative Benchmarking**: Persistence and Seasonal Historical Mean baselines, Linear $L_2$ Ridge Regression, Non-Linear Random Forest Ensembles, and `TimeSeriesSplit(n_splits=5, gap=12)` tuned XGBoost Regressors.
+4. **Dual-Head Architecture**: Multi-horizon continuous count regressor paired with a balanced Saturation Classifier ($P(\text{Occ} \ge 90\%)$) evaluated via Precision-Recall AUC (PR-AUC = 0.9498).
+5. **Explainable AI (SHAP)**: Global feature beeswarm attribution, mean $|SHAP|$ bar rankings, and local waterfall decision traces for rush-hour transitions and steady states.
+6. **Error Analysis & Diagnostics**: Residuals vs. Fitted plots, normal distribution Q-Q plots, and cross-zone spatial error breakdown.
+7. **Anti-Herding Traffic Dispersion**: Real-time `InFlightDispatchTracker` with 15-minute TTL buffering and Softmax traffic dispersion to eliminate herd collapse.
+8. **Full-Stack Web Microservice**: High-performance asynchronous **FastAPI** backend with SlowAPI rate limiting, serving responsive multi-page **TailwindCSS & Chart.js** interfaces.
 
 ---
 
@@ -44,63 +47,76 @@ Calibrated against aerial surveys from `collab_content_backup/LPU PARKINGz`:
 
 ---
 
-## 3. Quick Start & Execution Guide
+## 3. Machine Learning Benchmark Results (Holdout Test Split)
+
+| Model Architecture | Forecast Horizon | Data Partition | MAE (Cars) | RMSE (Cars) | $R^2$ Score | Surge Inflection MAE |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Persistence Baseline** | +15 min | Holdout Test | 6.064 | 9.209 | 0.9805 | 15.571 |
+| **Seasonal Historical Mean** | +15 min | Holdout Test | 40.399 | 53.852 | 0.3339 | — |
+| **Ridge Regression ($L_2$)** | +15 min | Holdout Test | 5.607 | 8.350 | 0.9840 | 15.846 |
+| **Random Forest Ensemble** | +15 min | Holdout Test | 4.069 | 5.539 | 0.9930 | 7.296 |
+| **Tuned XGBoost** | +15 min | Validation | 4.634 | 6.354 | 0.9906 | — |
+| **Tuned XGBoost** | +15 min | Holdout Test | **4.660** | **6.442** | **0.9905** | **9.839** (~40% vs Pers.) |
+| **Tuned XGBoost** | +30 min | Holdout Test | 5.360 | 7.451 | 0.9872 | — |
+| **Tuned XGBoost** | +60 min | Holdout Test | 6.743 | 9.739 | 0.9782 | — |
+| **Saturation Classifier** | +15 min | Holdout Test | — | — | — | **PR-AUC = 0.9498** (Recall: 98.7%) |
+
+---
+
+## 4. Quick Start & Execution Guide
 
 ### Prerequisites & Installation
 ```bash
 # Clone the repository
-git clone https://github.com/mohammed-shujath-ali/Campus-Parking-Occupancy-Prediction.git
-cd Campus-Parking-Occupancy-Prediction
+git clone https://github.com/Mohd-Shujath-Ali/Campus-Parking-Occupancy-Prediction-Intelligent-Parking-Assistant.git
+cd Campus-Parking-Occupancy-Prediction-Intelligent-Parking-Assistant
 
 # Install pinned dependencies
 pip install -r requirements.txt
 ```
 
-### 1. Run End-to-End Training & Baseline Benchmarking
+### 1. Run End-to-End Training & Diagnostics
 ```bash
 python -m models.train
 ```
-*Outputs: Generates `lpu_timeseries.csv`, fits Persistence, Seasonal Mean, and Tuned XGBoost models, and exports `artifacts/model_comparison.csv` and serialised `.joblib` pipelines.*
+*Outputs: Evaluates all candidate baselines, runs 5-fold TimeSeriesSplit GridSearchCV, trains multi-horizon estimators, generates error analysis plots (`residuals_vs_fitted.png`, `error_distribution_qq.png`, `error_by_zone_boxplot.png`), and serializes model wrappers to `artifacts/pipelines/`.*
 
-### 2. Launch FastAPI Web Application & API Server
-
-#### Option A: Run via Docker (Recommended)
+### 2. Generate Explainable AI (SHAP) Interpretability Suite
 ```bash
-# Start all containerized services with Docker Compose
-docker compose up --build -d
-
-# Check container status & health
-docker compose ps
-docker compose logs -f
+python -m explainability.shap_analysis
 ```
-See [DOCKER.md](file:///D:/Academic/Semester%205/ML/Supervised/DOCKER.md) for full containerization details and GPU configuration.
+*Outputs: Generates TreeSHAP summary beeswarm, feature importance bar charts, and local rush-hour / steady-state decision waterfalls to `artifacts/figures/`.*
 
-#### Option B: Run Locally
+### 3. Launch FastAPI Web Application & API Server
 ```bash
 python -m uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
 ```
-- **Web App**: Open `http://localhost:8000/` in your browser for the responsive Driver Assistant & Campus Estate Console.
-- **REST API Docs**: Open `http://localhost:8000/docs` for interactive Swagger documentation.
+- **Driver Assistant**: `http://localhost:8000/` (Arrival horizon planning, anti-herding dispatch, counterfactual recommendations).
+- **Admin Command Center**: `http://localhost:8000/admin` (Real-time occupancy charts, camera sensor telemetry, invariant stream detection).
+- **Vision & ROI Studio**: `http://localhost:8000/vision` (Live webcam stream, interactive polygon/box ROI drawing, dual-model YOLO benchmarking).
+- **Model Analytics & XAI**: `http://localhost:8000/analytics` (Benchmark comparisons, SHAP attribution tabs, residual diagnostics).
+- **Campus Topology & Heatmap**: `http://localhost:8000/zones` (Live 12-zone congestion heatmap grid and grounds directory).
+- **Interactive REST Swagger**: `http://localhost:8000/docs`.
 
-### 3. Run Unit & Integration Tests
+### 4. Run Test Suite
 ```bash
 pytest tests/ -v
 ```
+*Runs 26 automated unit and integration tests verifying API endpoints, data pipelines, anti-herding dispatch, and computer vision filters.*
 
 ---
 
-## 4. REST API Documentation
+## 5. Jupyter Research Notebooks
 
-- `GET /`: Serves the responsive web application dashboard.
-- `GET /api/health`: System status, active zones count, forecast horizons.
-- `GET /api/zones`: Full metadata for all 12 LPU parking grounds.
-- `POST /api/predict`: Forecast occupancy for given zone, current count, and horizon (+15, +30, +60 min).
-- `GET /api/recommendations?destination=Block_26_CSE&horizon_minutes=15`: Returns ranked viable parking grounds with walking distance, arrival availability, and smart tips.
+The `notebooks/` directory contains structured, reproducible experiments aligned with the course rubrics:
+- `notebooks/01_exploratory_data_analysis.ipynb`: Data quality checks, ADF stationarity tests, ACF/PACF lag selection, bell surge distributions, exam period density shifts, saturation class imbalance, and correlation heatmaps.
+- `notebooks/02_model_training_and_tuning.ipynb`: Chronological train/val/test splitting, baseline vs. ML model comparisons, TimeSeriesSplit GridSearchCV curves, surge inflection error breakdown, and dual-head classification evaluation.
+- `notebooks/smote_experiment.ipynb`: Oversampling and imbalance handling experiments.
 
 ---
 
-## 5. Team Contribution (Rubric Component 10)
+## 6. Team Contributions
 
-- **Mohammed Shujath Ali (12404599)**: Forecasting architecture, TimeSeriesSplit XGBoost tuning, full-stack FastAPI + Tailwind web dashboard, temporal feature pipeline, project coordination.
-- **SREEVYAS CS (12400848)**: Computer vision ROI polygon management, Ground contact point geometry, cross-camera Spatial NMS deduplication, FastAPI REST service, unit testing.
-- **Dr. Mohit Arora (Faculty Supervisor)**: Project guidance and academic evaluation.
+- **Mohammed Shujath Ali (12404599)**: Forecasting architecture, TimeSeriesSplit hyperparameter tuning, TreeSHAP interpretability, full-stack FastAPI microservice, TailwindCSS/Chart.js frontends, anti-herding dispatch tracker, and project coordination.
+- **SREEVYAS CS (12400848)**: Computer vision ROI polygon management, Ground contact point geometry, cross-camera Spatial NMS deduplication, image degradation diagnostics, test suite development.
+- **Dr. Mohit Arora (Faculty Supervisor)**: Project mentorship, technical guidance, and academic evaluation.
