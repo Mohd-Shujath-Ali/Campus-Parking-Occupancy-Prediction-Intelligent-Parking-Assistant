@@ -114,7 +114,9 @@ async function captureAndDetect() {
                 const ann = document.getElementById('webcamAnnotatedImg');
                 ann.src = 'data:image/jpeg;base64,' + d.annotated_image_base64;
                 ann.classList.remove('hidden');
-                document.getElementById('webcamVideo').classList.add('hidden');
+                // Ensure video remains active in DOM so canvas.drawImage continues grabbing frames
+                const videoEl = document.getElementById('webcamVideo');
+                if (videoEl) videoEl.classList.remove('hidden');
                 const count = d.vehicle_count !== undefined ? d.vehicle_count : (d.vehicle_count_total || 0);
                 setText('webcamCarCount', count);
                 setText('webcamLatency',  d.inference_time_ms + 'ms');
@@ -282,6 +284,11 @@ function redrawRoiCanvas() {
 async function uploadAndDetectImage() {
     if (!selectedImageFile) return;
 
+    if (roiPoints.length > 0 && roiPoints.length < 3) {
+        alert('Please complete the ROI polygon with at least 3 vertices (or click "Clear ROI" to detect the full lot).');
+        return;
+    }
+
     const btn = document.getElementById('btnRunDetect');
     const lbl = document.getElementById('btnDetectLabel');
     const modelChoice = document.getElementById('modelChoiceSelect')?.value || 'both';
@@ -315,34 +322,64 @@ function renderDualModelResults(data) {
     if (!wrap) return;
     wrap.classList.remove('hidden');
 
+    const modelChoice = document.getElementById('modelChoiceSelect')?.value || 'both';
     const comp = data.comparison || {};
-    const best = data.best_model || {};
-    const yolo = data.yolo26l_model || {};
+    const best = data.best_model || (modelChoice === 'best' ? data : {});
+    const yolo = data.yolo26l_model || (modelChoice === 'yolo26l' ? data : {});
 
-    setText('compHeaderRegion', `Target Region: ${comp.target_region || 'Selected ROI'}`);
-    setText('compSpeedBadge', comp.speed_summary || 'Inference Complete');
+    setText('compHeaderRegion', `Target Region: ${comp.target_region || (data.roi_defined ? 'Custom ROI' : 'Full Parking Lot')}`);
+    setText('compSpeedBadge', comp.speed_summary || `${modelChoice.toUpperCase()} Inference Complete`);
 
-    setText('bestCountRoi', best.vehicle_count_roi ?? data.vehicle_count_roi ?? 0);
-    setText('bestCountTotal', best.vehicle_count_total ?? data.vehicle_count_total ?? 0);
-    setText('bestAvgConf', Math.round((best.avg_confidence || 0) * 100) + '%');
-    setText('bestLatency', (best.inference_time_ms || data.inference_time_ms || 0) + ' ms');
+    // Best Model Card
+    const bestCard = document.getElementById('cardBestModel');
+    if (modelChoice === 'yolo26l') {
+        if (bestCard) bestCard.classList.add('opacity-40');
+        setText('bestCountRoi', '—');
+        setText('bestCountTotal', '—');
+        setText('bestAvgConf', 'Not Run');
+        setText('bestLatency', '—');
+    } else {
+        if (bestCard) bestCard.classList.remove('opacity-40');
+        setText('bestCountRoi', best.vehicle_count_roi ?? data.vehicle_count_roi ?? 0);
+        setText('bestCountTotal', best.vehicle_count_total ?? data.vehicle_count_total ?? 0);
+        const conf = best.avg_confidence !== undefined ? Math.round(best.avg_confidence * 100) + '%' : (data.avg_confidence ? Math.round(data.avg_confidence * 100) + '%' : '—');
+        setText('bestAvgConf', conf);
+        setText('bestLatency', (best.inference_time_ms || data.inference_time_ms || 0) + ' ms');
+    }
 
-    setText('yolo26lCountRoi', yolo.vehicle_count_roi ?? 0);
-    setText('yolo26lCountTotal', yolo.vehicle_count_total ?? 0);
-    setText('yolo26lAvgConf', Math.round((yolo.avg_confidence || 0) * 100) + '%');
-    setText('yolo26lLatency', (yolo.inference_time_ms || 0) + ' ms');
+    // YOLO26l Card
+    const yoloCard = document.getElementById('cardYolo26l');
+    if (modelChoice === 'best') {
+        if (yoloCard) yoloCard.classList.add('opacity-40');
+        setText('yolo26lCountRoi', '—');
+        setText('yolo26lCountTotal', '—');
+        setText('yolo26lAvgConf', 'Not Run');
+        setText('yolo26lLatency', '—');
+    } else {
+        if (yoloCard) yoloCard.classList.remove('opacity-40');
+        setText('yolo26lCountRoi', yolo.vehicle_count_roi ?? (modelChoice === 'yolo26l' ? data.vehicle_count_roi : 0));
+        setText('yolo26lCountTotal', yolo.vehicle_count_total ?? (modelChoice === 'yolo26l' ? data.vehicle_count_total : 0));
+        const conf = yolo.avg_confidence !== undefined ? Math.round(yolo.avg_confidence * 100) + '%' : '—';
+        setText('yolo26lAvgConf', conf);
+        setText('yolo26lLatency', (yolo.inference_time_ms || (modelChoice === 'yolo26l' ? data.inference_time_ms : 0)) + ' ms');
+    }
 
+    // Annotated images
     const imgBest = document.getElementById('imgBestAnnotated');
-    const b64Best = best.annotated_image_base64 || data.annotated_image_base64;
+    const b64Best = best.annotated_image_base64 || (modelChoice === 'best' ? data.annotated_image_base64 : '');
     if (imgBest && b64Best) imgBest.src = 'data:image/jpeg;base64,' + b64Best;
 
     const imgYolo = document.getElementById('imgYolo26lAnnotated');
-    const b64Yolo = yolo.annotated_image_base64;
+    const b64Yolo = yolo.annotated_image_base64 || (modelChoice === 'yolo26l' ? data.annotated_image_base64 : '');
     if (imgYolo && b64Yolo) imgYolo.src = 'data:image/jpeg;base64,' + b64Yolo;
 
     const bulletsList = document.getElementById('compAnalysisBullets');
-    if (bulletsList && comp.analysis_bullets) {
-        bulletsList.innerHTML = comp.analysis_bullets.map(b => `<li>${b}</li>`).join('');
+    if (bulletsList) {
+        if (comp.analysis_bullets && comp.analysis_bullets.length > 0) {
+            bulletsList.innerHTML = comp.analysis_bullets.map(b => `<li>${b}</li>`).join('');
+        } else {
+            bulletsList.innerHTML = `<li>Executed single-model evaluation (${modelChoice.toUpperCase()}) across selected detection region.</li>`;
+        }
     }
 
     wrap.scrollIntoView({ behavior: 'smooth' });

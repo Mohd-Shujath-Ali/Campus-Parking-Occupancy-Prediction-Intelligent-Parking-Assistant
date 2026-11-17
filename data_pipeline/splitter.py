@@ -23,7 +23,7 @@ class ChronologicalSplitter:
     def split_dataframe(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         df = df.copy()
         df['timestamp'] = pd.to_datetime(df['timestamp'])
-        df.sort_values('timestamp', inplace=True)
+        df = df.sort_values('timestamp')
         
         unique_timestamps = np.sort(df['timestamp'].unique())
         total_steps = len(unique_timestamps)

@@ -8,9 +8,11 @@ import os
 import hashlib
 import logging
 import joblib
+import threading
+from collections import deque
 import numpy as np
 import pandas as pd
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from zoneinfo import ZoneInfo
 from typing import Dict, Any, Optional
 from pathlib import Path
@@ -61,6 +63,74 @@ def models_ready() -> Dict[str, Any]:
     return {"loaded": ok, "error": _load_error}
 
 
+class _TemporalRingBuffer:
+    """
+    Thread-safe temporal sliding ring buffer storing historical counts at 5-min intervals
+    (retains up to 24 observations = 2 hours) to derive causal lags and velocity deltas
+    during live streaming inference without forcing callers to manage history.
+    """
+    def __init__(self, maxlen: int = 24):
+        self._maxlen = maxlen
+        self._buffers: Dict[str, deque] = {}
+        self._lock = threading.Lock()
+
+    def record_observation(self, zone_id: str, count: int, timestamp: Optional[datetime] = None):
+        if timestamp is None:
+            timestamp = datetime.now(_IST)
+        with self._lock:
+            if zone_id not in self._buffers:
+                self._buffers[zone_id] = deque(maxlen=self._maxlen)
+            self._buffers[zone_id].append((timestamp, int(count)))
+
+    def get_lags(self, zone_id: str, current_count: int, timestamp: Optional[datetime] = None) -> Dict[str, int]:
+        if timestamp is None:
+            timestamp = datetime.now(_IST)
+        with self._lock:
+            buf = self._buffers.get(zone_id)
+            if not buf or len(buf) < 2:
+                # Cold start: Return current count
+                return {
+                    "15m": current_count,
+                    "30m": current_count,
+                    "45m": current_count,
+                    "60m": current_count,
+                }
+
+            history = list(buf)
+
+            def find_lag(offset_minutes: int) -> int:
+                target_time = timestamp - timedelta(minutes=offset_minutes)
+                best_diff = float("inf")
+                best_val = current_count
+                for t, c in history:
+                    diff = abs((t - target_time).total_seconds())
+                    if diff < best_diff:
+                        best_diff = diff
+                        best_val = c
+                return best_val
+
+            return {
+                "15m": find_lag(15),
+                "30m": find_lag(30),
+                "45m": find_lag(45),
+                "60m": find_lag(60),
+            }
+
+    def is_stream_frozen(self, zone_id: str) -> bool:
+        """
+        Detects camera/video ingest freeze (e.g. frozen CCTV stream):
+        returns True if the last 6 consecutive readings are identical and non-empty.
+        """
+        with self._lock:
+            buf = self._buffers.get(zone_id)
+            if not buf or len(buf) < 6:
+                return False
+            last_counts = [c for _, c in list(buf)[-6:]]
+            return len(set(last_counts)) == 1
+
+_ring_buffer = _TemporalRingBuffer()
+
+
 # ---------------------------------------------------------------------------
 # Feature construction from live API inputs
 # ---------------------------------------------------------------------------
@@ -76,11 +146,13 @@ def _build_feature_row(
 ) -> pd.DataFrame:
     """
     Constructs the 20-feature vector expected by the trained XGBoost model.
-    When historical lag counts are not supplied, uses the same current_count
-    for all lags (most conservative fallback).
+    When historical lag counts are not supplied, queries the Temporal Ring Buffer.
     """
     if timestamp is None:
         timestamp = datetime.now(_IST)
+
+    if lag_counts is None:
+        lag_counts = _ring_buffer.get_lags(zone_id, current_count, timestamp)
 
     hour_frac = timestamp.hour + timestamp.minute / 60.0
     dow = timestamp.weekday()  # 0=Mon ... 6=Sun
@@ -92,11 +164,11 @@ def _build_feature_row(
     is_weekend = int(dow >= 5)
     occ_ratio  = current_count / operational_capacity if operational_capacity > 0 else 0.0
 
-    # Lag counts — use current if unavailable
-    lag_15 = lag_counts.get("15m", current_count) if lag_counts else current_count
-    lag_30 = lag_counts.get("30m", current_count) if lag_counts else current_count
-    lag_45 = lag_counts.get("45m", current_count) if lag_counts else current_count
-    lag_60 = lag_counts.get("60m", current_count) if lag_counts else current_count
+    # Lag counts — support both '15m' and 'lag_15m' keys
+    lag_15 = lag_counts.get("15m", lag_counts.get("lag_15m", current_count))
+    lag_30 = lag_counts.get("30m", lag_counts.get("lag_30m", current_count))
+    lag_45 = lag_counts.get("45m", lag_counts.get("lag_45m", current_count))
+    lag_60 = lag_counts.get("60m", lag_counts.get("lag_60m", current_count))
 
     delta_15 = current_count - lag_15
     delta_30 = current_count - lag_30
@@ -182,6 +254,10 @@ def predict_zone(
     status     = ("SATURATED" if occ_rate >= 0.90 else
                   "FILLING_FAST" if occ_rate >= 0.75 else "AVAILABLE")
 
+    # Record observation in temporal ring buffer
+    _ring_buffer.record_observation(zone_id, current_count, timestamp)
+    is_frozen = _ring_buffer.is_stream_frozen(zone_id)
+
     return {
         "predicted_vehicle_count": pred_count,
         "operational_capacity":    operational_capacity,
@@ -190,6 +266,7 @@ def predict_zone(
         "saturation_probability":  round(sat_proba, 4),
         "status":                  status,
         "inference_source":        source,
+        "stream_frozen":           is_frozen,
     }
 
 

@@ -1,6 +1,40 @@
 import yaml
+import time
+import threading
 import numpy as np
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
+
+class InFlightDispatchTracker:
+    """
+    Tracks active in-flight driver dispatches towards parking zones with a 15-minute TTL.
+    Prevents recommendation herd collapse where multiple drivers arriving simultaneously
+    are all routed to the same currently-vacant zone until it abruptly overflows.
+    """
+    def __init__(self, ttl_seconds: int = 900):
+        self.ttl_seconds = ttl_seconds
+        self._dispatches: Dict[str, List[float]] = {}
+        self._lock = threading.Lock()
+
+    def record_dispatch(self, zone_id: str) -> int:
+        now = time.time()
+        with self._lock:
+            if zone_id not in self._dispatches:
+                self._dispatches[zone_id] = []
+            self._dispatches[zone_id].append(now)
+            active = [t for t in self._dispatches[zone_id] if t > (now - self.ttl_seconds)]
+            self._dispatches[zone_id] = active
+            return len(active)
+
+    def get_in_flight_count(self, zone_id: str) -> int:
+        now = time.time()
+        cutoff = now - self.ttl_seconds
+        with self._lock:
+            if zone_id not in self._dispatches:
+                return 0
+            active = [t for t in self._dispatches[zone_id] if t > cutoff]
+            self._dispatches[zone_id] = active
+            return len(active)
+
 
 class ParkingRanker:
     """
@@ -17,6 +51,7 @@ class ParkingRanker:
             "freshness_penalty_weight": 0.15,
             "saturation_threshold": 0.90
         })
+        self.dispatch_tracker = InFlightDispatchTracker(ttl_seconds=900)
 
     def rank_zones(
         self,
@@ -32,8 +67,10 @@ class ParkingRanker:
             pred = predictions.get(z_id, {})
             pred_count = pred.get("predicted_count", 0)
             cap = z_meta["operational_capacity"]
-            avail_spaces = max(0, cap - pred_count)
-            occ_rate = pred_count / cap if cap > 0 else 1.0
+            in_flight = self.dispatch_tracker.get_in_flight_count(z_id)
+            avail_spaces = max(0, cap - pred_count - in_flight)
+            effective_count = pred_count + in_flight
+            occ_rate = effective_count / cap if cap > 0 else 1.0
             sat_prob = pred.get("saturation_prob", 0.0)
             cam_age = pred.get("camera_age_seconds", 30.0)
 

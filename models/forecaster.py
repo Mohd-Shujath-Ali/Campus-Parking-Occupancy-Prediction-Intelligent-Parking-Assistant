@@ -11,25 +11,35 @@ class MultiHorizonForecaster:
     Manages direct multi-horizon estimators (H=15, H=30, H=60 minutes)
     and benchmarks them against Persistence and Historical Mean baselines.
     """
-    def __init__(self, model_type: str = "xgboost"):
+    def __init__(self, model_type: str = "xgboost", params: Dict[str, Any] = None):
         self.model_type = model_type
+        self.params = params or {}
         self.models: Dict[str, Any] = {}
         self.horizons = ["H15", "H30", "H60"]
 
     def _get_estimator(self):
         if self.model_type == "ridge":
-            return Ridge(alpha=1.0)
+            alpha = self.params.get("alpha", 1.0)
+            return Ridge(alpha=alpha)
         elif self.model_type == "random_forest":
-            return RandomForestRegressor(n_estimators=100, max_depth=10, random_state=42)
+            rf_params = {
+                "n_estimators": 100,
+                "max_depth": 10,
+                "random_state": 42
+            }
+            rf_params.update(self.params)
+            return RandomForestRegressor(**rf_params)
         elif self.model_type == "xgboost":
-            return xgb.XGBRegressor(
-                n_estimators=150,
-                learning_rate=0.05,
-                max_depth=6,
-                subsample=0.8,
-                colsample_bytree=0.8,
-                random_state=42
-            )
+            xgb_params = {
+                "n_estimators": 150,
+                "learning_rate": 0.05,
+                "max_depth": 6,
+                "subsample": 0.8,
+                "colsample_bytree": 0.8,
+                "random_state": 42
+            }
+            xgb_params.update(self.params)
+            return xgb.XGBRegressor(**xgb_params)
         else:
             raise ValueError(f"Unknown model_type: {self.model_type}")
 

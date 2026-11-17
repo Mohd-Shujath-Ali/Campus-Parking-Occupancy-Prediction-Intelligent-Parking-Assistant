@@ -11,12 +11,13 @@ import logging
 import pandas as pd
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
-from fastapi import APIRouter, HTTPException, Query, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, Query, UploadFile, File, Form, Request
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from typing import List, Dict, Any, Optional
 
-from api.schemas import PredictionRequest, PredictionResponse, RecommendationResponse, ZoneRankItem
+from api.limiter import limiter
+from api.schemas import PredictionRequest, PredictionResponse, RecommendationResponse, ZoneRankItem, NavigateRequest
 from recommendation.parking_ranker import ParkingRanker
 from models.inference import predict_zone, predict_all_zones, models_ready
 
@@ -118,6 +119,7 @@ def predict_occupancy(req: PredictionRequest):
         is_exam_day=req.is_exam_day,
         is_class_transition=req.is_class_transition,
         timestamp=ts,
+        lag_counts=req.lag_counts,
     )
 
     confidence = "HIGH_CONFIDENCE_ML" if result["inference_source"] == "xgboost_model" else "HEURISTIC_FALLBACK"
@@ -132,7 +134,8 @@ def predict_occupancy(req: PredictionRequest):
         occupancy_rate=result["occupancy_rate"],
         saturation_probability=result["saturation_probability"],
         status=result["status"],
-        confidence_level=confidence
+        confidence_level=confidence,
+        stream_frozen=result.get("stream_frozen", False)
     )
 
 
@@ -198,6 +201,27 @@ def _get_valid_destinations():
 
 
 # ---------------------------------------------------------------------------
+# Driver Navigation & Anti-Herding Dispatch
+# ---------------------------------------------------------------------------
+
+@router.post("/navigate")
+def record_driver_navigation(req: NavigateRequest):
+    """
+    Registers a driver dispatching towards a specific parking zone.
+    Updates the InFlightDispatchTracker to proactively prevent congestion herd collapse.
+    """
+    if req.zone_id not in ZONES_MAP:
+        raise HTTPException(status_code=404, detail="Zone not found.")
+    active_count = ranker.dispatch_tracker.record_dispatch(req.zone_id)
+    return {
+        "status": "DISPATCH_REGISTERED",
+        "zone_id": req.zone_id,
+        "active_in_flight_count": active_count,
+        "message": f"Navigation locked to {ZONES_MAP[req.zone_id]['name']}. Spot buffered against herd collapse."
+    }
+
+
+# ---------------------------------------------------------------------------
 # Real-Time Campus Snapshot — drives Admin occupancy chart
 # ---------------------------------------------------------------------------
 
@@ -243,6 +267,7 @@ def get_campus_snapshot(
             "status": pred.get("status", "AVAILABLE"),
             "camera_age_seconds": pred.get("camera_age_seconds", 30.0),
             "camera_status": pred.get("camera_status", "live"),
+            "stream_frozen": pred.get("stream_frozen", False),
         })
 
     campus_occ_rate = round(total_occupied / total_capacity, 4) if total_capacity > 0 else 0.0
@@ -282,7 +307,22 @@ def get_model_metrics():
             if isinstance(v, float) and pd.isna(v):
                 r[k] = None  # clean NaN for JSON
 
-    xgb_h15 = df[(df["Model"] == "Tuned XGBoost") & (df["Horizon"] == "+15 min")]
+    # Filter by Holdout Test split if present
+    if "Split" in df.columns:
+        xgb_h15 = df[(df["Model"] == "Tuned XGBoost") & (df["Horizon"] == "+15 min") & (df["Split"] == "Holdout Test")]
+    else:
+        xgb_h15 = df[(df["Model"] == "Tuned XGBoost") & (df["Horizon"] == "+15 min")]
+
+    sat_row = df[df["Model"] == "Saturation Classifier"]
+    sat_metrics = {}
+    if len(sat_row) > 0:
+        row = sat_row.iloc[0]
+        sat_metrics = {
+            "pr_auc": float(row["PR_AUC"]) if "PR_AUC" in row and pd.notna(row["PR_AUC"]) else None,
+            "recall": float(row["Recall"]) if "Recall" in row and pd.notna(row["Recall"]) else None,
+            "accuracy": float(row["Accuracy"]) if "Accuracy" in row and pd.notna(row["Accuracy"]) else None,
+        }
+
     return {
         "models": records,
         "ml_ready": ml_status["loaded"],
@@ -290,8 +330,35 @@ def get_model_metrics():
             "mae":            float(xgb_h15["MAE"].values[0])            if len(xgb_h15) else None,
             "r2":             float(xgb_h15["R2"].values[0])             if len(xgb_h15) else None,
             "inflection_mae": float(xgb_h15["Inflection_MAE"].values[0]) if len(xgb_h15) and pd.notna(xgb_h15["Inflection_MAE"].values[0]) else None,
-        }
+        },
+        "saturation_classifier": sat_metrics
     }
+
+
+ALLOWED_FIGURES = {
+    "shap_summary_beeswarm.png",
+    "shap_waterfall_rush_hour.png",
+    "shap_waterfall_steady_state.png",
+    "shap_feature_importance_bar.png",
+    "residuals_vs_fitted.png",
+    "error_distribution_qq.png",
+    "error_by_zone_boxplot.png",
+    "feature_correlation_heatmap.png",
+}
+
+@router.get("/shap-figure/{filename}")
+def get_shap_figure(filename: str):
+    """
+    Serves generated SHAP and diagnostic figures safely from artifacts/figures.
+    """
+    if filename not in ALLOWED_FIGURES:
+        raise HTTPException(status_code=404, detail="Figure not found or not in allowed list.")
+    
+    path = os.path.join("artifacts", "figures", filename)
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail=f"Figure {filename} has not been generated yet.")
+    
+    return FileResponse(path, media_type="image/png")
 
 
 # ---------------------------------------------------------------------------
@@ -299,7 +366,9 @@ def get_model_metrics():
 # ---------------------------------------------------------------------------
 
 @router.post("/detect-image")
+@limiter.limit("15/minute")
 async def detect_image(
+    request: Request,
     file: UploadFile = File(...),
     roi: Optional[str] = Form(None),
     model_choice: str = Form("both")
@@ -385,7 +454,8 @@ async def detect_image(
 # ---------------------------------------------------------------------------
 
 @router.post("/detect-frame")
-async def detect_frame(file: UploadFile = File(...)):
+@limiter.limit("60/minute")
+async def detect_frame(request: Request, file: UploadFile = File(...)):
     """
     Accept a single webcam frame (JPEG blob from browser canvas.toBlob).
     Returns annotated frame (base64 JPEG) + count + detections.

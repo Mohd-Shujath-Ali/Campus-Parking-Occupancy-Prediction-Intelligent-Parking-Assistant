@@ -98,11 +98,12 @@ class TimeSeriesFeaturePipeline:
 
         if "zone_id" in df.columns and df["zone_id"].nunique() > 1:
             # Multi-zone path: apply per-zone, then concat
-            result = (
-                df.groupby("zone_id", group_keys=False)
-                .apply(self._transform_single_zone, cadence_minutes)
-            )
-            result = result.reset_index(drop=True)
+            chunks = []
+            for zone_id, group in df.groupby("zone_id"):
+                transformed_group = self._transform_single_zone(group, cadence_minutes)
+                transformed_group["zone_id"] = zone_id
+                chunks.append(transformed_group)
+            result = pd.concat(chunks, ignore_index=True)
         else:
             # Single-zone path (also works if zone_id column is absent)
             result = self._transform_single_zone(df, cadence_minutes)

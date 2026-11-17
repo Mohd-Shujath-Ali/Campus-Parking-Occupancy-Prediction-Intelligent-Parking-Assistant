@@ -36,7 +36,7 @@
             <!-- Viewport Container -->
             <div class="relative bg-slate-950 rounded-xl overflow-hidden aspect-video flex items-center justify-center border border-slate-800 shadow-inner">
                 <video id="webcamVideo" autoplay playsinline muted class="w-full h-full object-contain hidden"></video>
-                <img id="webcamAnnotatedImg" class="w-full h-full object-contain hidden" alt="YOLO Annotated Stream">
+                <img id="webcamAnnotatedImg" class="absolute inset-0 w-full h-full object-contain hidden pointer-events-none" alt="YOLO Annotated Stream">
                 <div id="webcamPlaceholder" class="text-center text-slate-400 p-6 flex flex-col items-center">
                     <i class="fa-solid fa-video-slash text-4xl mb-3 opacity-30 text-slate-500"></i>
                     <p class="text-xs font-semibold text-slate-400">Webcam currently inactive</p>

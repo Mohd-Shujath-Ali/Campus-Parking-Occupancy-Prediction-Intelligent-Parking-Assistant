@@ -1,6 +1,91 @@
 'use strict';
 
-async function loadZones() {
+async function loadZonesData() {
+    await Promise.all([loadZonesDirectory(), loadHeatmapSnapshot()]);
+}
+
+async function loadHeatmapSnapshot() {
+    const grid = document.getElementById('heatmapGrid');
+    const tsEl = document.getElementById('heatmapTimestamp');
+    if (!grid) return;
+
+    try {
+        const res = await fetch('/api/snapshot');
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        
+        if (tsEl && data.timestamp) {
+            const d = new Date(data.timestamp);
+            tsEl.textContent = `Updated: ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
+        }
+
+        renderHeatmapGrid(data.zones || []);
+    } catch (err) {
+        if (grid) {
+            grid.innerHTML = `<div class="col-span-full py-3 text-center text-xs text-rose-500">Failed to load real-time heatmap: ${err.message}</div>`;
+        }
+    }
+}
+
+function renderHeatmapGrid(zones) {
+    const grid = document.getElementById('heatmapGrid');
+    if (!grid) return;
+
+    if (zones.length === 0) {
+        grid.innerHTML = '<div class="col-span-full py-3 text-center text-xs text-slate-400">No snapshot data available.</div>';
+        return;
+    }
+
+    grid.innerHTML = zones.map(z => {
+        const occRate = z.occupancy_rate !== undefined ? z.occupancy_rate : (z.predicted_vehicle_count / z.operational_capacity);
+        const occPct = Math.round(occRate * 100);
+        
+        let colorClass = 'border-emerald-300 bg-emerald-50/60 text-emerald-800';
+        let barColor = 'bg-emerald-500';
+        let badgeColor = 'bg-emerald-100 text-emerald-800';
+        let statusText = 'Free';
+
+        if (occRate >= 0.85) {
+            colorClass = 'border-rose-300 bg-rose-50/60 text-rose-800';
+            barColor = 'bg-rose-500';
+            badgeColor = 'bg-rose-100 text-rose-800 font-bold';
+            statusText = 'Congested';
+        } else if (occRate >= 0.65) {
+            colorClass = 'border-amber-300 bg-amber-50/60 text-amber-800';
+            barColor = 'bg-amber-500';
+            badgeColor = 'bg-amber-100 text-amber-800';
+            statusText = 'Moderate';
+        }
+
+        if (z.camera_status === 'offline') {
+            colorClass = 'border-slate-300 bg-slate-50 text-slate-600';
+            badgeColor = 'bg-slate-200 text-slate-600';
+            statusText = 'Offline';
+        }
+
+        return `
+        <div class="rounded-xl border ${colorClass} p-3 flex flex-col justify-between shadow-xs transition-all hover:shadow-sm">
+            <div class="flex justify-between items-start">
+                <span class="text-[10px] font-mono font-bold truncate max-w-[85px]">${z.zone_id.replace('ZONE_', '')}</span>
+                <span class="text-[9px] px-1.5 py-0.5 rounded ${badgeColor}">${statusText}</span>
+            </div>
+            
+            <div class="my-2">
+                <div class="flex items-baseline justify-between">
+                    <span class="text-lg font-black">${occPct}%</span>
+                    <span class="text-[10px] font-mono opacity-80">${z.predicted_vehicle_count}/${z.operational_capacity}</span>
+                </div>
+                <div class="w-full bg-slate-200/80 rounded-full h-1.5 mt-1 overflow-hidden">
+                    <div class="${barColor} h-1.5 rounded-full transition-all duration-500" style="width: ${Math.min(100, occPct)}%"></div>
+                </div>
+            </div>
+
+            <div class="text-[10px] truncate text-slate-600 font-medium">${z.name}</div>
+        </div>`;
+    }).join('');
+}
+
+async function loadZonesDirectory() {
     try {
         const res = await fetch('/api/zones');
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -63,4 +148,4 @@ function renderZones(zones) {
     }).join('');
 }
 
-document.addEventListener('DOMContentLoaded', loadZones);
+document.addEventListener('DOMContentLoaded', loadZonesData);

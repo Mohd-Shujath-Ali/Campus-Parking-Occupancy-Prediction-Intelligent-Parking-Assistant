@@ -204,3 +204,51 @@ def test_favicon_served():
     assert res.status_code == 200
     assert res.headers["content-type"] in ("image/x-icon", "image/vnd.microsoft.icon",
                                            "image/ico", "application/octet-stream")
+
+
+# ─────────────────────────── Anti-Herding & Navigation ────────
+
+def test_navigate_endpoint():
+    res = client.post("/api/navigate", json={"zone_id": "ZONE_BLOCK1"})
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "DISPATCH_REGISTERED"
+    assert data["zone_id"] == "ZONE_BLOCK1"
+    assert data["active_in_flight_count"] >= 1
+
+
+def test_navigate_invalid_zone():
+    res = client.post("/api/navigate", json={"zone_id": "ZONE_UNKNOWN_XYZ"})
+    assert res.status_code == 404
+
+
+# ─────────────────────────── SHAP & Figures ───────────────────
+
+def test_shap_figure_endpoint():
+    res = client.get("/api/shap-figure/shap_summary_beeswarm.png")
+    assert res.status_code == 200
+    assert res.headers["content-type"] == "image/png"
+    assert len(res.content) > 1000
+
+
+def test_shap_figure_whitelist_guard():
+    res = client.get("/api/shap-figure/unauthorized_file.png")
+    assert res.status_code == 404
+
+
+# ─────────────────────────── CV Quality & Edge Guard ──────────
+
+def test_image_quality_assessment():
+    import numpy as np
+    from computer_vision.detection import assess_image_quality
+
+    # Underexposed (black frame)
+    black_img = np.zeros((100, 100, 3), dtype=np.uint8)
+    q_black = assess_image_quality(black_img)
+    assert q_black["is_degraded"] is True
+    assert any("underexposure" in r.lower() for r in q_black["reasons"])
+
+    # Normal illuminated frame
+    normal_img = np.random.randint(60, 180, (100, 100, 3), dtype=np.uint8)
+    q_norm = assess_image_quality(normal_img)
+    assert q_norm["mean_brightness"] >= 50.0

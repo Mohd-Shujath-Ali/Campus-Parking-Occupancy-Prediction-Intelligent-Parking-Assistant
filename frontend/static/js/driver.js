@@ -104,11 +104,17 @@ function renderRecommendations(data) {
                     </div>
                 </div>
 
-                <div class="flex items-center space-x-3 self-end sm:self-auto">
+                <div class="flex items-center space-x-2 self-end sm:self-auto">
                     <span class="inline-flex items-center text-xs px-2.5 py-1 rounded-full font-bold border ${sc.badge}">
                         <span class="w-1.5 h-1.5 rounded-full ${sc.dot} mr-1.5"></span>
                         ${statusLabel(z.status)}
                     </span>
+                    <button onclick="dispatchToZone('${z.zone_id}', '${z.name.replace(/'/g, "\\\'")}')" 
+                        id="btnNav_${z.zone_id}"
+                        class="px-2.5 py-1 bg-orange-600 hover:bg-orange-700 text-white rounded-lg text-xs font-bold transition-all shadow-xs flex items-center space-x-1">
+                        <i class="fa-solid fa-location-arrow text-[10px]"></i>
+                        <span>Navigate</span>
+                    </button>
                 </div>
             </div>
 
@@ -140,6 +146,35 @@ function renderRecommendations(data) {
         </div>`;
     }).join('');
 }
+
+async function dispatchToZone(zoneId, zoneName) {
+    const btn = document.getElementById(`btnNav_${zoneId}`);
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = `<i class="fa-solid fa-circle-check text-emerald-300"></i> Locked`;
+        btn.className = 'px-2.5 py-1 bg-emerald-600 text-white rounded-lg text-xs font-bold transition-all shadow-xs flex items-center space-x-1';
+    }
+    try {
+        const res = await fetch('/api/navigate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ zone_id: zoneId })
+        });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        
+        // Show non-blocking dispatch notification
+        const tipBox = document.getElementById('smartTipBox');
+        const tipTxt = document.getElementById('smartTipText');
+        if (tipBox && tipTxt) {
+            tipTxt.textContent = `Route Locked to ${zoneName}: 1 spot reserved in-flight against congestion shockwaves (active in-flight vehicles: ${data.active_in_flight_count}).`;
+            tipBox.classList.remove('hidden');
+        }
+    } catch (err) {
+        console.error('Dispatch error:', err);
+    }
+}
+window.dispatchToZone = dispatchToZone;
 
 document.addEventListener('DOMContentLoaded', () => {
     fetchRecommendations();

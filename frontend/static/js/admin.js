@@ -141,6 +141,7 @@ function renderTelemetryTable(zones) {
                     <span class="w-1.5 h-1.5 rounded-full ${sc.dot} mr-1"></span>
                     ${statusLabel(z.status)}
                 </span>
+                ${z.stream_frozen ? '<span class="inline-flex items-center text-[10px] px-2 py-0.5 rounded bg-amber-100 text-amber-800 font-bold ml-1 border border-amber-300" title="Invariant sensor stream detected">⚠ Invariant</span>' : ''}
             </td>
         </tr>`;
     }).join('');

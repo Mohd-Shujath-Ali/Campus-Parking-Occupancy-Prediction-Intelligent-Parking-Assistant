@@ -5,6 +5,9 @@ from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from api.limiter import limiter
 from api.routes import router
 
 app = FastAPI(
@@ -12,6 +15,9 @@ app = FastAPI(
     description="End-to-End Parking Occupancy Prediction, Multi-Camera Vision, and Intelligent Recommendation Engine for Lovely Professional University.",
     version="2.0.0"
 )
+
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # CORS: allow_credentials=True requires explicit origin list (wildcard is rejected by browsers).
 # In production set ALLOWED_ORIGINS env-var to your deployed domain.
