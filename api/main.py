@@ -43,23 +43,23 @@ async def favicon():
 # Multi-Page Web Dashboard Routes
 @app.get("/", response_class=HTMLResponse)
 async def serve_driver_view(request: Request):
-    return templates.TemplateResponse("driver.html", {"request": request, "active_page": "driver"})
+    return templates.TemplateResponse(request=request, name="driver.html", context={"active_page": "driver"})
 
 @app.get("/admin", response_class=HTMLResponse)
 async def serve_admin_view(request: Request):
-    return templates.TemplateResponse("admin.html", {"request": request, "active_page": "admin"})
+    return templates.TemplateResponse(request=request, name="admin.html", context={"active_page": "admin"})
 
 @app.get("/vision", response_class=HTMLResponse)
 async def serve_vision_view(request: Request):
-    return templates.TemplateResponse("vision.html", {"request": request, "active_page": "vision"})
+    return templates.TemplateResponse(request=request, name="vision.html", context={"active_page": "vision"})
 
 @app.get("/analytics", response_class=HTMLResponse)
 async def serve_analytics_view(request: Request):
-    return templates.TemplateResponse("analytics.html", {"request": request, "active_page": "analytics"})
+    return templates.TemplateResponse(request=request, name="analytics.html", context={"active_page": "analytics"})
 
 @app.get("/zones", response_class=HTMLResponse)
 async def serve_zones_view(request: Request):
-    return templates.TemplateResponse("zones.html", {"request": request, "active_page": "zones"})
+    return templates.TemplateResponse(request=request, name="zones.html", context={"active_page": "zones"})
 
 if __name__ == "__main__":
     uvicorn.run("api.main:app", host="0.0.0.0", port=8000, reload=True)
