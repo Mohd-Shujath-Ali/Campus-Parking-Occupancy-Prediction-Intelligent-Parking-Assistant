@@ -15,18 +15,12 @@ from zoneinfo import ZoneInfo
 from typing import Dict, Any, Optional
 from pathlib import Path
 
+from features.feature_pipeline import FEATURE_COLS, zone_code
+from models.history import HISTORY, ZoneHistory
+
 logger = logging.getLogger(__name__)
 _IST = ZoneInfo("Asia/Kolkata")
 
-FEATURE_COLS = [
-    'vehicle_count', 'operational_capacity', 'occupancy_ratio',
-    'hour_sin', 'hour_cos', 'day_sin', 'day_cos', 'is_weekend',
-    'is_exam_day', 'is_class_transition',
-    'lag_15m', 'lag_30m', 'lag_45m', 'lag_60m',
-    'delta_15m', 'delta_30m',
-    'rolling_mean_30m', 'rolling_std_30m',
-    'rolling_mean_60m', 'rolling_std_60m'
-]
 
 # ---------------------------------------------------------------------------
 # Model loader (singleton pattern — loaded once at startup)
@@ -73,66 +67,75 @@ def _build_feature_row(
     is_class_transition: bool,
     timestamp: Optional[datetime] = None,
     lag_counts: Optional[Dict[str, int]] = None,  # {'15m':x, '30m':x, '45m':x, '60m':x}
-) -> pd.DataFrame:
+    history: Optional[ZoneHistory] = None,
+    is_campus_event: bool = False,
+):
     """
-    Constructs the 20-feature vector expected by the trained XGBoost model.
-    When historical lag counts are not supplied, uses the same current_count
-    for all lags (most conservative fallback).
+    Build the feature vector in the exact schema used for training
+    (features.feature_pipeline.FEATURE_COLS).
+
+    Lag sources, in priority order: explicit ``lag_counts`` > rolling
+    ``history`` buffer > current count (flagged as "estimated").
+    Returns (DataFrame, lag_source) where lag_source is "observed",
+    "partial" or "estimated".
     """
     if timestamp is None:
         timestamp = datetime.now(_IST)
 
     hour_frac = timestamp.hour + timestamp.minute / 60.0
     dow = timestamp.weekday()  # 0=Mon ... 6=Sun
+    occ_ratio = current_count / operational_capacity if operational_capacity > 0 else 0.0
 
-    hour_sin = np.sin(2 * np.pi * hour_frac / 24.0)
-    hour_cos = np.cos(2 * np.pi * hour_frac / 24.0)
-    day_sin  = np.sin(2 * np.pi * dow / 7.0)
-    day_cos  = np.cos(2 * np.pi * dow / 7.0)
-    is_weekend = int(dow >= 5)
-    occ_ratio  = current_count / operational_capacity if operational_capacity > 0 else 0.0
+    lags: Dict[int, Optional[int]] = {}
+    for m in (15, 30, 45, 60):
+        v = None
+        if lag_counts and f"{m}m" in lag_counts:
+            v = lag_counts[f"{m}m"]
+        elif history is not None:
+            v = history.lag(zone_id, timestamp, m)
+        lags[m] = v
+    found = sum(v is not None for v in lags.values())
+    lag_source = "observed" if found == 4 else "partial" if found else "estimated"
+    lag_val = {m: (v if v is not None else current_count) for m, v in lags.items()}
 
-    # Lag counts — use current if unavailable
-    lag_15 = lag_counts.get("15m", current_count) if lag_counts else current_count
-    lag_30 = lag_counts.get("30m", current_count) if lag_counts else current_count
-    lag_45 = lag_counts.get("45m", current_count) if lag_counts else current_count
-    lag_60 = lag_counts.get("60m", current_count) if lag_counts else current_count
+    # Rolling stats: training uses the 5-minute samples t-5..t-W (current step
+    # excluded, pandas sample std). Use the same window when history exists.
+    def _roll(w: int):
+        vals = history.window(zone_id, timestamp, w) if history is not None else []
+        if not vals:  # fall back to whatever lags we have
+            vals = [lag_val[m] for m in (15, 30, 45, 60) if m <= w] or [current_count]
+        arr = np.asarray(vals, dtype=float)
+        std = float(arr.std(ddof=1)) if len(arr) > 1 else 0.0
+        return float(arr.mean()), std
 
-    delta_15 = current_count - lag_15
-    delta_30 = current_count - lag_30
-
-    # Rolling stats from lag history (mean & std over last 30/60m)
-    lag_values_30 = [current_count, lag_15, lag_30]
-    lag_values_60 = [current_count, lag_15, lag_30, lag_45, lag_60]
-    rolling_mean_30 = float(np.mean(lag_values_30))
-    rolling_std_30  = float(np.std(lag_values_30, ddof=0))
-    rolling_mean_60 = float(np.mean(lag_values_60))
-    rolling_std_60  = float(np.std(lag_values_60, ddof=0))
+    rm30, rs30 = _roll(30)
+    rm60, rs60 = _roll(60)
 
     row = {
-        'vehicle_count':      current_count,
+        'vehicle_count':        current_count,
         'operational_capacity': operational_capacity,
-        'occupancy_ratio':    occ_ratio,
-        'hour_sin':           hour_sin,
-        'hour_cos':           hour_cos,
-        'day_sin':            day_sin,
-        'day_cos':            day_cos,
-        'is_weekend':         is_weekend,
-        'is_exam_day':        int(is_exam_day),
-        'is_class_transition': int(is_class_transition),
-        'lag_15m':            lag_15,
-        'lag_30m':            lag_30,
-        'lag_45m':            lag_45,
-        'lag_60m':            lag_60,
-        'delta_15m':          delta_15,
-        'delta_30m':          delta_30,
-        'rolling_mean_30m':   rolling_mean_30,
-        'rolling_std_30m':    rolling_std_30,
-        'rolling_mean_60m':   rolling_mean_60,
-        'rolling_std_60m':    rolling_std_60,
+        'occupancy_ratio':      occ_ratio,
+        'zone_code':            zone_code(zone_id),
+        'hour_sin':             np.sin(2 * np.pi * hour_frac / 24.0),
+        'hour_cos':             np.cos(2 * np.pi * hour_frac / 24.0),
+        'day_sin':              np.sin(2 * np.pi * dow / 7.0),
+        'day_cos':              np.cos(2 * np.pi * dow / 7.0),
+        'is_weekend':           int(dow >= 5),
+        'is_exam_day':          int(is_exam_day),
+        'is_campus_event':      int(is_campus_event),
+        'is_class_transition':  int(is_class_transition),
+        'lag_15m':              lag_val[15],
+        'lag_30m':              lag_val[30],
+        'lag_45m':              lag_val[45],
+        'lag_60m':              lag_val[60],
+        'delta_15m':            current_count - lag_val[15],
+        'delta_30m':            current_count - lag_val[30],
+        'rolling_mean_30m':     rm30,
+        'rolling_std_30m':      rs30,
+        'rolling_mean_60m':     rm60,
+        'rolling_std_60m':      rs60,
     }
-
-    return pd.DataFrame([row], columns=FEATURE_COLS)
+    return pd.DataFrame([row], columns=FEATURE_COLS), lag_source
 
 
 # ---------------------------------------------------------------------------
@@ -148,6 +151,9 @@ def predict_zone(
     is_class_transition: bool = False,
     timestamp: Optional[datetime] = None,
     lag_counts: Optional[Dict[str, int]] = None,
+    is_campus_event: bool = False,
+    history: Optional[ZoneHistory] = HISTORY,
+    record: bool = True,
 ) -> Dict[str, Any]:
     """
     Runs the real XGBoost multi-horizon forecaster on the given zone state.
@@ -155,6 +161,9 @@ def predict_zone(
     Falls back to heuristic if model is unavailable.
     """
     _load_models()
+    if timestamp is None:
+        timestamp = datetime.now(_IST)
+    lag_source = "estimated"
 
     horizon_key_map = {15: "H15", 30: "H30", 60: "H60"}
     h_key = horizon_key_map.get(horizon_minutes, "H15")
@@ -167,14 +176,19 @@ def predict_zone(
         sat_proba  = 0.5
         source     = "heuristic_fallback"
     else:
-        X = _build_feature_row(
+        X, lag_source = _build_feature_row(
             zone_id, current_count, operational_capacity,
-            is_exam_day, is_class_transition, timestamp, lag_counts
+            is_exam_day, is_class_transition, timestamp, lag_counts,
+            history=history, is_campus_event=is_campus_event,
         )
         preds = _xgb_model.predict(X)
         pred_count = int(max(0, min(operational_capacity * 1.20, round(preds[h_key][0]))))
         sat_proba  = float(_clf_model.predict_proba(X)[0])
         source     = "xgboost_model"
+
+    # Remember this observation so later calls get real lags
+    if record and history is not None:
+        history.record(zone_id, timestamp, current_count)
 
     avail      = max(0, operational_capacity - pred_count)
     # Cap occ_rate at 1.0 — a zone cannot exceed 100% by definition
@@ -190,6 +204,9 @@ def predict_zone(
         "saturation_probability":  round(sat_proba, 4),
         "status":                  status,
         "inference_source":        source,
+        # "observed": all lags from real history; "partial"/"estimated": some
+        # or all lags were filled with the current count (lower reliability)
+        "lag_source":              lag_source,
     }
 
 
@@ -229,10 +246,13 @@ def predict_all_zones(
             is_exam_day=is_exam_day,
             is_class_transition=is_class_transition,
             timestamp=timestamp,
+            history=None,    # simulated counts must not mix with real history
+            record=False,
         )
         pred["current_count"] = sim_count
         pred["camera_age_seconds"] = float(zone_seed % 60)  # simulated age 0-60s
         pred["camera_status"] = "live"
+        pred["count_source"] = "simulated"  # demo mode: not a real detection
         results[z_id] = pred
 
     return results

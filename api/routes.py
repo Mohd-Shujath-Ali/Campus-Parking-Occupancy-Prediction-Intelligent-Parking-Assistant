@@ -132,7 +132,8 @@ def predict_occupancy(req: PredictionRequest):
         occupancy_rate=result["occupancy_rate"],
         saturation_probability=result["saturation_probability"],
         status=result["status"],
-        confidence_level=confidence
+        confidence_level=confidence,
+        lag_source=result.get("lag_source", "estimated"),
     )
 
 
