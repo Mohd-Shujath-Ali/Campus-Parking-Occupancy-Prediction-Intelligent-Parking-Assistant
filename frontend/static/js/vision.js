@@ -107,7 +107,8 @@ async function captureAndDetect() {
         const fd = new FormData();
         fd.append('file', blob, 'frame.jpg');
         try {
-            const res = await fetch('/api/detect-frame', { method: 'POST', body: fd });
+            const url = window.apiUrl ? window.apiUrl('/api/detect-frame') : '/api/detect-frame';
+            const res = await fetch(url, { method: 'POST', body: fd });
             if (!res.ok) return;
             const d = await res.json();
             if (d.annotated_image_base64) {
@@ -305,7 +306,8 @@ async function uploadAndDetectImage() {
     }
 
     try {
-        const res = await fetch('/api/detect-image', { method: 'POST', body: fd });
+        const url = window.apiUrl ? window.apiUrl('/api/detect-image') : '/api/detect-image';
+        const res = await fetch(url, { method: 'POST', body: fd });
         if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
         const data = await res.json();
         renderDualModelResults(data);

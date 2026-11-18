@@ -20,7 +20,8 @@ function setText(id, text) {
 
 async function refreshSnapshot() {
     try {
-        const res = await fetch('/api/snapshot');
+        const url = window.apiUrl ? window.apiUrl('/api/snapshot') : '/api/snapshot';
+        const res = await fetch(url);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         renderSnapshot(data);

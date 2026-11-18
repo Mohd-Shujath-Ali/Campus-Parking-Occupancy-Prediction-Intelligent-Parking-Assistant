@@ -42,7 +42,8 @@ async function fetchRecommendations() {
             is_class_transition: isTrans,
             is_exam_day: isExam
         });
-        const res = await fetch(`/api/recommendations?${params}`);
+        const url = (window.apiUrl ? window.apiUrl('/api/recommendations') : '/api/recommendations') + `?${params}`;
+        const res = await fetch(url);
         if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
         const data = await res.json();
         renderRecommendations(data);
@@ -155,7 +156,8 @@ async function dispatchToZone(zoneId, zoneName) {
         btn.className = 'px-2.5 py-1 bg-emerald-600 text-white rounded-lg text-xs font-bold transition-all shadow-xs flex items-center space-x-1';
     }
     try {
-        const res = await fetch('/api/navigate', {
+        const url = window.apiUrl ? window.apiUrl('/api/navigate') : '/api/navigate';
+        const res = await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ zone_id: zoneId })

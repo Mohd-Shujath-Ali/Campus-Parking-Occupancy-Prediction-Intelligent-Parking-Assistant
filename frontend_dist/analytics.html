@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ML Model Benchmarks & Analytics — LPU Smart Parking</title>
+    <link rel="icon" href="/favicon.ico" type="image/x-icon">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/css/styles.css">
+    <script src="/static/js/config.js"></script>
+    
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col font-sans">
+
+<!-- ═══════════════════════════ GLOBAL HEADER ═══════════════════════════ -->
+<header class="bg-white border-b border-slate-200 sticky top-0 z-50 shadow-sm">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex justify-between items-center h-16">
+        <!-- Brand / Logo -->
+        <a href="/" class="flex items-center space-x-3 group">
+            <div class="h-11 w-11 rounded-xl bg-white p-1 border border-slate-200 shadow-sm flex items-center justify-center overflow-hidden transition-transform group-hover:scale-105">
+                <img src="/static/lpu_logo.png" alt="LPU Logo" class="h-full w-full object-contain">
+            </div>
+            <div>
+                <h1 class="text-base sm:text-lg font-black text-slate-900 leading-tight">LPU Smart Parking</h1>
+                <p class="text-[11px] text-slate-500 font-medium">Lovely Professional University · Punjab</p>
+            </div>
+        </a>
+
+        <!-- Desktop Navigation Bar -->
+        <nav class="hidden md:flex items-center space-x-1 bg-slate-100 p-1.5 rounded-xl border border-slate-200 text-xs font-bold">
+            <a href="/" class="px-3.5 py-1.5 rounded-lg transition-all flex items-center space-x-1.5 text-slate-600 hover:text-slate-900">
+                <i class="fa-solid fa-car"></i><span>Driver Assistant</span>
+            </a>
+            <a href="/admin" class="px-3.5 py-1.5 rounded-lg transition-all flex items-center space-x-1.5 text-slate-600 hover:text-slate-900">
+                <i class="fa-solid fa-shield-halved"></i><span>Estate Console</span>
+            </a>
+            <a href="/vision" class="px-3.5 py-1.5 rounded-lg transition-all flex items-center space-x-1.5 text-slate-600 hover:text-slate-900">
+                <i class="fa-solid fa-video"></i><span>Vision AI Lab</span>
+            </a>
+            <a href="/analytics" class="px-3.5 py-1.5 rounded-lg transition-all flex items-center space-x-1.5 bg-white text-orange-600 shadow-sm">
+                <i class="fa-solid fa-chart-line"></i><span>Benchmarks</span>
+            </a>
+            <a href="/zones" class="px-3.5 py-1.5 rounded-lg transition-all flex items-center space-x-1.5 text-slate-600 hover:text-slate-900">
+                <i class="fa-solid fa-map-location-dot"></i><span>Campus Grounds</span>
+            </a>
+        </nav>
+
+        <!-- Right Side: Health Indicator & Mobile Menu Toggle -->
+        <div class="flex items-center space-x-3">
+            <div id="systemStatusDot" class="hidden sm:flex items-center space-x-2 text-xs text-slate-600 bg-slate-50 px-3 py-1.5 rounded-full border border-slate-200">
+                <span class="w-2 h-2 rounded-full bg-slate-300" id="statusDot"></span>
+                <span id="statusLabel" class="font-medium text-[11px]">Connecting…</span>
+            </div>
+
+            <!-- Mobile Menu Button -->
+            <button onclick="toggleMobileNav()" class="md:hidden p-2 rounded-lg text-slate-600 hover:bg-slate-100 border border-slate-200">
+                <i class="fa-solid fa-bars text-sm"></i>
+            </button>
+        </div>
+    </div>
+
+    <!-- Mobile Navigation Dropdown -->
+    <div id="mobileNavMenu" class="hidden md:hidden border-t border-slate-200 bg-white px-4 py-3 space-y-1 text-sm font-semibold">
+        <a href="/" class="block px-3 py-2 rounded-lg text-slate-600 hover:bg-slate-50">
+            <i class="fa-solid fa-car w-5"></i> Driver Assistant
+        </a>
+        <a href="/admin" class="block px-3 py-2 rounded-lg text-slate-600 hover:bg-slate-50">
+            <i class="fa-solid fa-shield-halved w-5"></i> Estate Console
+        </a>
+        <a href="/vision" class="block px-3 py-2 rounded-lg text-slate-600 hover:bg-slate-50">
+            <i class="fa-solid fa-video w-5"></i> Vision AI Lab
+        </a>
+        <a href="/analytics" class="block px-3 py-2 rounded-lg bg-orange-50 text-orange-600">
+            <i class="fa-solid fa-chart-line w-5"></i> Benchmarks
+        </a>
+        <a href="/zones" class="block px-3 py-2 rounded-lg text-slate-600 hover:bg-slate-50">
+            <i class="fa-solid fa-map-location-dot w-5"></i> Campus Grounds
+        </a>
+    </div>
+</header>
+
+<!-- ═══════════════════════════ MAIN CONTENT ═══════════════════════════ -->
+<main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+    
+<section class="space-y-6">
+    <!-- Header -->
+    <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col sm:flex-row justify-between sm:items-center gap-3">
+        <div>
+            <h2 class="text-xl font-black text-slate-900 flex items-center space-x-2">
+                <i class="fa-solid fa-chart-line text-orange-600"></i>
+                <span>Supervised ML Benchmarks &amp; Inflection-Hour Analysis</span>
+            </h2>
+            <p class="text-xs text-slate-500 mt-0.5">Empirical evaluation comparing Tuned XGBoost against Persistence and Seasonal Mean lower-bound baselines.</p>
+        </div>
+        <span class="text-xs font-mono text-slate-500 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200">
+            Holdout Test Split (15% Chronological)
+        </span>
+    </div>
+
+    <!-- Benchmark Cards -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+            <span class="text-xs font-bold text-slate-500 uppercase tracking-wider">XGBoost H15 Overall MAE</span>
+            <div class="text-2xl font-black text-emerald-600 mt-1" id="kpiMae">— <span class="text-xs font-normal text-slate-400">Cars</span></div>
+            <span class="text-xs text-slate-500 font-medium" id="kpiR2Label">Loading test split metrics…</span>
+        </div>
+        <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+            <span class="text-xs font-bold text-slate-500 uppercase tracking-wider">Class Transition Inflection MAE</span>
+            <div class="text-2xl font-black text-orange-600 mt-1" id="kpiInflectionMae">— <span class="text-xs font-normal text-slate-400">Cars</span></div>
+            <span class="text-xs text-emerald-600 font-medium" id="kpiInflectionSub">Evaluating transition window…</span>
+        </div>
+        <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+            <span class="text-xs font-bold text-slate-500 uppercase tracking-wider">Saturation Classifier PR-AUC</span>
+            <div class="text-2xl font-black text-slate-900 mt-1" id="kpiPrAuc">— <span class="text-xs font-normal text-slate-400">PR-AUC</span></div>
+            <span class="text-xs text-emerald-600 font-medium" id="kpiPrAucSub">P(Occ ≥ 90%) Balanced Recall</span>
+        </div>
+    </div>
+
+    <!-- Benchmark Comparison Chart -->
+    <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+        <div class="flex justify-between items-center border-b border-slate-100 pb-3">
+            <div>
+                <h4 class="font-bold text-slate-900 text-sm">Model Comparison: Overall MAE vs. Rush-Hour Inflection Error</h4>
+                <p class="text-xs text-slate-500">Evaluating forecast degradation during sudden lecture transition surge windows (±15 min)</p>
+            </div>
+            <span class="text-xs font-mono text-slate-400">artifacts/model_comparison.csv</span>
+        </div>
+
+        <div id="benchmarkLoading" class="text-xs text-slate-400 text-center py-10">Loading model benchmark metrics…</div>
+        <div class="relative h-80 hidden" id="benchChartWrap">
+            <canvas id="benchmarkChart"></canvas>
+        </div>
+    </div>
+
+    <!-- Model Comparison Data Table -->
+    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div class="px-6 py-4 border-b border-slate-100">
+            <h4 class="font-bold text-slate-900 text-sm">Comprehensive Model Evaluation Matrix</h4>
+            <p class="text-xs text-slate-500">Holdout validation metrics across forecast horizons (+15, +30, +60 minutes)</p>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="w-full text-left text-xs">
+                <thead class="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold uppercase tracking-wider">
+                    <tr>
+                        <th class="px-4 py-3">Model Architecture</th>
+                        <th class="px-4 py-3">Forecast Horizon</th>
+                        <th class="px-4 py-3">Data Split</th>
+                        <th class="px-4 py-3">MAE (Cars)</th>
+                        <th class="px-4 py-3">RMSE (Cars)</th>
+                        <th class="px-4 py-3">R² Score</th>
+                        <th class="px-4 py-3">Rush Inflection MAE</th>
+                    </tr>
+                </thead>
+                <tbody id="metricsTableBody" class="divide-y divide-slate-100 text-slate-700">
+                    <tr><td colspan="7" class="px-4 py-6 text-center text-slate-400">Loading benchmark table…</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Explainable AI (XAI) Section -->
+    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div class="px-6 py-4 border-b border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-3">
+            <div>
+                <h4 class="font-bold text-slate-900 text-sm">Explainable AI — SHAP Feature Attribution</h4>
+                <p class="text-xs text-slate-500">TreeSHAP global importance and local prediction explanations (XGBoost H15 on 15% holdout test set)</p>
+            </div>
+            <div class="flex flex-wrap gap-2">
+                <button onclick="showShapTab('beeswarm')" id="tabBeeswarm" class="shap-tab px-3 py-1.5 rounded-lg text-xs font-bold bg-orange-600 text-white transition-colors">Global Beeswarm</button>
+                <button onclick="showShapTab('importance')" id="tabImportance" class="shap-tab px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors">Feature Importance</button>
+                <button onclick="showShapTab('rush')" id="tabRush" class="shap-tab px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors">Rush Hour Waterfall</button>
+                <button onclick="showShapTab('steady')" id="tabSteady" class="shap-tab px-3 py-1.5 rounded-lg text-xs font-bold bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors">Steady State Waterfall</button>
+            </div>
+        </div>
+        <div class="p-6">
+            <div id="shapViewBeeswarm" class="shap-view text-center">
+                <img src="/api/shap-figure/shap_summary_beeswarm.png" alt="SHAP Beeswarm Summary Plot" class="mx-auto rounded-xl border border-slate-200 shadow-sm max-h-[500px] object-contain">
+                <p class="text-xs text-slate-500 mt-2">Distribution of SHAP values illustrating how positive/negative feature values push predictions higher or lower.</p>
+            </div>
+            <div id="shapViewImportance" class="shap-view text-center hidden">
+                <img src="/api/shap-figure/shap_feature_importance_bar.png" alt="SHAP Feature Importance" class="mx-auto rounded-xl border border-slate-200 shadow-sm max-h-[500px] object-contain">
+                <p class="text-xs text-slate-500 mt-2">Ranking of top driving features based on mean absolute SHAP attribution values.</p>
+            </div>
+            <div id="shapViewRush" class="shap-view text-center hidden">
+                <img src="/api/shap-figure/shap_waterfall_rush_hour.png" alt="SHAP Rush Hour Local Explanation" class="mx-auto rounded-xl border border-slate-200 shadow-sm max-h-[500px] object-contain">
+                <p class="text-xs text-slate-500 mt-2">Local decision attribution for a lecture bell transition surge scenario.</p>
+            </div>
+            <div id="shapViewSteady" class="shap-view text-center hidden">
+                <img src="/api/shap-figure/shap_waterfall_steady_state.png" alt="SHAP Steady State Local Explanation" class="mx-auto rounded-xl border border-slate-200 shadow-sm max-h-[500px] object-contain">
+                <p class="text-xs text-slate-500 mt-2">Local decision attribution for a low-activity steady state scenario.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Error Analysis & Model Diagnostics -->
+    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div class="px-6 py-4 border-b border-slate-100">
+            <h4 class="font-bold text-slate-900 text-sm">Model Diagnostics & Residual Error Analysis</h4>
+            <p class="text-xs text-slate-500">Heteroscedasticity, normality check (Q-Q plot), and spatial performance by campus zone</p>
+        </div>
+        <div class="p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div class="space-y-2">
+                <h5 class="text-xs font-bold text-slate-700 uppercase tracking-wider">Residuals vs. Fitted Values</h5>
+                <img src="/api/shap-figure/residuals_vs_fitted.png" alt="Residuals vs Fitted" class="w-full rounded-xl border border-slate-200 shadow-sm object-contain">
+            </div>
+            <div class="space-y-2">
+                <h5 class="text-xs font-bold text-slate-700 uppercase tracking-wider">Residual Distribution & Q-Q Plot</h5>
+                <img src="/api/shap-figure/error_distribution_qq.png" alt="Error Distribution and Q-Q Plot" class="w-full rounded-xl border border-slate-200 shadow-sm object-contain">
+            </div>
+            <div class="space-y-2 md:col-span-2">
+                <h5 class="text-xs font-bold text-slate-700 uppercase tracking-wider">Spatial Error Breakdown Across All 12 Zones</h5>
+                <img src="/api/shap-figure/error_by_zone_boxplot.png" alt="Error by Zone Boxplot" class="w-full rounded-xl border border-slate-200 shadow-sm object-contain">
+            </div>
+        </div>
+    </div>
+</section>
+
+</main>
+
+<script>
+function toggleMobileNav() {
+    const el = document.getElementById('mobileNavMenu');
+    if (el) el.classList.toggle('hidden');
+}
+
+// Global System Health Probe
+async function probeGlobalHealth() {
+    try {
+        const url = (window.apiUrl ? window.apiUrl('/api/health') : '/api/health');
+        const res = await fetch(url);
+        if (!res.ok) throw new Error('API Offline');
+        const data = await res.json();
+        const dot = document.getElementById('statusDot');
+        const lbl = document.getElementById('statusLabel');
+        const ml  = data.ml_model?.xgboost_loaded;
+        const cv  = data.yolo_model?.loaded;
+        if (dot && lbl) {
+            dot.className = `w-2 h-2 rounded-full ${ml ? 'bg-emerald-500' : 'bg-amber-500'}`;
+            lbl.textContent = ml && cv
+                ? 'XGBoost + YOLO Online'
+                : ml ? 'XGBoost ✓ YOLO ready'
+                : 'API Connected';
+        }
+    } catch {
+        const dot = document.getElementById('statusDot');
+        const lbl = document.getElementById('statusLabel');
+        if (dot) dot.className = 'w-2 h-2 rounded-full bg-rose-500';
+        if (lbl) lbl.textContent = 'API Offline';
+    }
+}
+document.addEventListener('DOMContentLoaded', probeGlobalHealth);
+</script>
+
+<script src="/static/js/analytics.js"></script>
+
+</body>
+</html>

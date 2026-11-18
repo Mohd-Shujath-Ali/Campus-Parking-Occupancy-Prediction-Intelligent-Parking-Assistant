@@ -36,7 +36,16 @@ window.showShapTab = showShapTab;
 
 async function loadModelMetrics() {
     try {
-        const res = await fetch('/api/metrics');
+        // Resolve dynamic figure paths if backend URL is decoupled
+        if (window.apiUrl) {
+            document.querySelectorAll('img[src^="/api/"]').forEach(img => {
+                const rel = img.getAttribute('src');
+                img.src = window.apiUrl(rel);
+            });
+        }
+
+        const url = window.apiUrl ? window.apiUrl('/api/metrics') : '/api/metrics';
+        const res = await fetch(url);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         renderMetricsView(data);

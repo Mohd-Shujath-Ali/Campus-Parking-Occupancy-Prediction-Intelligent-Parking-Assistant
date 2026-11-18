@@ -10,7 +10,8 @@ async function loadHeatmapSnapshot() {
     if (!grid) return;
 
     try {
-        const res = await fetch('/api/snapshot');
+        const url = window.apiUrl ? window.apiUrl('/api/snapshot') : '/api/snapshot';
+        const res = await fetch(url);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         
@@ -87,7 +88,8 @@ function renderHeatmapGrid(zones) {
 
 async function loadZonesDirectory() {
     try {
-        const res = await fetch('/api/zones');
+        const url = window.apiUrl ? window.apiUrl('/api/zones') : '/api/zones';
+        const res = await fetch(url);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const zones = await res.json();
         renderZones(zones);
