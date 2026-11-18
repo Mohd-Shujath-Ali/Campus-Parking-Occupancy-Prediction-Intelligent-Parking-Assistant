@@ -147,6 +147,31 @@ class TimeSeriesFeaturePipeline:
 
         return result
 
+    def prepare_with_meta(
+        self, df_features: pd.DataFrame
+    ) -> Tuple[pd.DataFrame, Dict[str, pd.Series], pd.DataFrame]:
+        """
+        Like prepare_training_matrices but also returns a metadata frame
+        (timestamp, zone_id, flags) aligned row-for-row with X. Rows are sorted
+        chronologically (stable, so zones stay interleaved per timestamp), which
+        is what time-series cross-validation needs.
+        """
+        target_cols = ["target_count_t15", "target_count_t30", "target_count_t60"]
+        clean_df = (
+            df_features.dropna(subset=FEATURE_COLS + target_cols)
+            .sort_values("timestamp", kind="stable")
+            .reset_index(drop=True)
+        )
+        X = clean_df[FEATURE_COLS]
+        targets = {
+            "H15": clean_df["target_count_t15"],
+            "H30": clean_df["target_count_t30"],
+            "H60": clean_df["target_count_t60"],
+            "SAT15": clean_df["target_saturated_t15"],
+        }
+        meta = clean_df[["timestamp", "zone_id"]].copy()
+        return X, targets, meta
+
     def prepare_training_matrices(
         self, df_features: pd.DataFrame
     ) -> Tuple[pd.DataFrame, Dict[str, pd.Series]]:

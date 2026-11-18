@@ -3,6 +3,7 @@ import pandas as pd
 from typing import Dict, Any, Tuple
 import xgboost as xgb
 from utils.config import xgb_params
+from models.pipeline import build_pipeline
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score, average_precision_score
 
 class SaturationClassifier:
@@ -21,7 +22,9 @@ class SaturationClassifier:
         neg_count = (y_train == 0).sum()
         scale_pos_weight = float(neg_count / max(1, pos_count))
 
-        self.model = xgb.XGBClassifier(scale_pos_weight=scale_pos_weight, **self.params)
+        # Same preprocessing Pipeline as the regressors, persisted as one object
+        self.model = build_pipeline(
+            xgb.XGBClassifier(scale_pos_weight=scale_pos_weight, **self.params))
         self.model.fit(X_train, y_train)
         return self
 

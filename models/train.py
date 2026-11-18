@@ -125,8 +125,9 @@ def run_training_pipeline():
     booster_dir = Path("artifacts/pipelines/boosters")
     booster_dir.mkdir(parents=True, exist_ok=True)
     for horizon, model in xgb_forecaster.models.items():
-        model.get_booster().save_model(str(booster_dir / f"xgb_{horizon}.ubj"))
-    sat_clf.model.get_booster().save_model(str(booster_dir / "saturation_clf.ubj"))
+        # models are Pipelines (preprocessing + XGBoost): export the XGBoost step
+        model.named_steps["model"].get_booster().save_model(str(booster_dir / f"xgb_{horizon}.ubj"))
+    sat_clf.model.named_steps["model"].get_booster().save_model(str(booster_dir / "saturation_clf.ubj"))
     print(f"\n[Step 8] Serialized joblib wrappers and portable .ubj boosters to artifacts/pipelines/")
 
     # 9. Build Comparison DataFrame

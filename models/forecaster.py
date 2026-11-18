@@ -7,14 +7,16 @@ import xgboost as xgb
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
 from utils.config import xgb_params
+from models.pipeline import build_pipeline
 
 class MultiHorizonForecaster:
     """
     Manages direct multi-horizon estimators (H=15, H=30, H=60 minutes)
     and benchmarks them against Persistence and Historical Mean baselines.
     """
-    def __init__(self, model_type: str = "xgboost"):
+    def __init__(self, model_type: str = "xgboost", use_pipeline: bool = True):
         self.model_type = model_type
+        self.use_pipeline = use_pipeline
         self.models: Dict[str, Any] = {}
         self.horizons = ["H15", "H30", "H60"]
 
@@ -29,12 +31,16 @@ class MultiHorizonForecaster:
         else:
             raise ValueError(f"Unknown model_type: {self.model_type}")
 
+    def _build(self):
+        est = self._get_estimator()
+        return build_pipeline(est) if self.use_pipeline else est
+
     def fit(self, X_train: pd.DataFrame, targets_train: Dict[str, pd.Series]):
         """
         Fits dedicated models for H15, H30, and H60.
         """
         for h in self.horizons:
-            estimator = self._get_estimator()
+            estimator = self._build()
             estimator.fit(X_train, targets_train[h])
             self.models[h] = estimator
 
