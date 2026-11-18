@@ -15,10 +15,10 @@ This project delivers an end-to-end Machine Learning, Computer Vision, and Decis
 
 Unlike traditional marked-stall sensor systems, this architecture addresses **open, unstructured campus grounds** using:
 1. **Perception**: Fine-tuned YOLO (`best.pt`) with Ground-Contact Point Jordan Ray-Casting Point-in-Polygon (PIP) and cross-camera Global Spatial NMS ($d < 2.5\text{m}$).
-2. **Zero-Leakage Time-Series Pipeline**: Multi-horizon forecasting ($+15, +30, +60$ min) combining continuous $\sin/\cos$ harmonic time, causal lags ($t-15, t-30, t-45, t-60$), shifted rolling demand velocity, and university lecture bell surge indicators.
-3. **Dual-Head Architecture**: Direct XGBoost Regressor paired with a SMOTE-balanced Saturation Classifier ($P(\text{Occ} \ge 90\%)$).
-4. **Inflection-Hour Evaluation**: Proves XGBoost outperforms persistence baselines by $>40\%$ during critical $\pm 15$ minute class transitions.
-5. **Anti-Herding Dispatcher**: Recommendation ranker with Softmax traffic dispersion to prevent sudden driver stampedes to the same parking ground.
+2. **Zero-Leakage Time-Series Pipeline**: Multi-horizon forecasting ($+15, +30, +60$ min) with a chronological 70/15/15 split (1 h buffer), 22 causal features: sin/cos time, zone identity, event/exam flags, lags ($t-15 \dots t-60$), velocity and shifted rolling statistics. Hyperparameters live in `configs/model_config.yaml`.
+3. **Dual-Head Architecture**: Direct XGBoost Regressor per horizon paired with a Saturation Classifier ($P(\text{Occ} \ge 90\%)$) that handles class imbalance with `scale_pos_weight`.
+4. **Inflection-Hour Evaluation**: On the simulated data, XGBoost cuts persistence MAE by roughly 59% inside $\pm 15$ minute class-transition windows (see Section 6 for caveats).
+5. **Anti-Herding Dispatcher**: Recommendation ranker that picks the lead lot among near-tied zones with softmax($\text{score}/\beta$) probabilities, so drivers are spread across equivalent lots.
 6. **Full-Stack Web Microservice**: High-performance asynchronous **FastAPI** backend with unified responsive **TailwindCSS & Chart.js** web interface (no Streamlit).
 
 ---
@@ -49,8 +49,8 @@ Calibrated against aerial surveys from `collab_content_backup/LPU PARKINGz`:
 ### Prerequisites & Installation
 ```bash
 # Clone the repository
-git clone https://github.com/mohammed-shujath-ali/Campus-Parking-Occupancy-Prediction.git
-cd Campus-Parking-Occupancy-Prediction
+git clone https://github.com/vibin-123/Campus-Parking-Occupancy-Prediction-Intelligent-Parking-Assistant.git
+cd Campus-Parking-Occupancy-Prediction-Intelligent-Parking-Assistant
 
 # Install pinned dependencies
 pip install -r requirements.txt
@@ -60,7 +60,7 @@ pip install -r requirements.txt
 ```bash
 python -m models.train
 ```
-*Outputs: Generates `lpu_timeseries.csv`, fits Persistence, Seasonal Mean, and Tuned XGBoost models, and exports `artifacts/model_comparison.csv` and serialised `.joblib` pipelines.*
+*Outputs: loads `data/processed/lpu_timeseries.csv` (regenerate it with `python -m data_pipeline.generator`), fits Persistence, zone-aware Seasonal Mean and XGBoost models, and exports `artifacts/model_comparison.csv` plus serialised `.joblib`/`.ubj` models.*
 
 ### 2. Launch FastAPI Web Application & API Server
 
@@ -73,7 +73,7 @@ docker compose up --build -d
 docker compose ps
 docker compose logs -f
 ```
-See [DOCKER.md](file:///D:/Academic/Semester%205/ML/Supervised/DOCKER.md) for full containerization details and GPU configuration.
+See [DOCKER.md](DOCKER.md) for full containerization details and GPU configuration.
 
 #### Option B: Run Locally
 ```bash
@@ -99,8 +99,32 @@ pytest tests/ -v
 
 ---
 
-## 5. Team Contribution (Rubric Component 10)
+## 5. Data Sources, Results & Limitations
 
-- **Mohammed Shujath Ali (12404599)**: Forecasting architecture, TimeSeriesSplit XGBoost tuning, full-stack FastAPI + Tailwind web dashboard, temporal feature pipeline, project coordination.
+**Occupancy time series (important).** `data/processed/lpu_timeseries.csv` is **simulated** by `data_pipeline/generator.py` (12 zones, 5-minute cadence, 56 days from 2026-09-01) from hand-written daily profiles per zone category, plus class-bell surges, an exam week, a campus event, rain days, a camera outage and Gaussian noise (σ = 2.5% of capacity). It is a stand-in until real detector counts are logged. Because the target is generated from these same profiles, scores below show that the pipeline works, **not** how well it would forecast real LPU traffic.
+
+**Vision data.** The YOLO training images in `collab_content_backup/LPU---Parking-1` come from a Roboflow export (licence CC BY 4.0, see its `README.roboflow.txt`). The image file names follow the timestamp pattern of the public PKLot dataset, so confirm the original source and cite it before submission.
+
+**Current results** (chronological hold-out, +15 min unless stated; simulated data):
+
+| Model | MAE (cars) | RMSE | R² | MAE in bell windows |
+| :--- | :---: | :---: | :---: | :---: |
+| Persistence | 6.63 | 10.12 | 0.979 | 15.33 |
+| Seasonal mean (zone × weekday × hour) | 6.35 | 9.93 | 0.980 | n/a |
+| XGBoost +15 min | 4.21 | 5.69 | 0.994 | 6.28 |
+| XGBoost +30 min | 4.49 | 6.08 | 0.993 | n/a |
+| XGBoost +60 min | 4.96 | 6.84 | 0.991 | n/a |
+
+The generator noise alone leaves an irreducible error of roughly 3-4 cars, so XGBoost is already close to the ceiling. The zone-aware seasonal mean is a strong baseline: the earlier 40-car MAE came from averaging all zones together.
+
+**Serving.** `/api/predict` builds lags from a rolling per-zone history (`models/history.py`) and returns `lag_source` (`observed`, `partial` or `estimated`). Counts in `/api/recommendations` are simulated demo values (`count_source: simulated`) until the camera counter feeds the history buffer.
+
+**Not yet done:** hyperparameter search / cross-validation, additional model comparisons (Ridge, Random Forest, stacking), SHAP explanations, error analysis and an EDA notebook.
+
+---
+
+## 6. Team Contribution (Rubric Component 10)
+
+- **Mohammed Shujath Ali (12404599)**: Forecasting architecture, XGBoost forecaster, full-stack FastAPI + Tailwind web dashboard, temporal feature pipeline, project coordination.
 - **SREEVYAS CS (12400848)**: Computer vision ROI polygon management, Ground contact point geometry, cross-camera Spatial NMS deduplication, FastAPI REST service, unit testing.
 - **Dr. Mohit Arora (Faculty Supervisor)**: Project guidance and academic evaluation.

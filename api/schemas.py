@@ -20,6 +20,7 @@ class PredictionResponse(BaseModel):
     saturation_probability: float
     status: str
     confidence_level: str
+    lag_source: str = "estimated"  # observed | partial | estimated
 
 class RecommendationRequest(BaseModel):
     destination: str = Field(..., description="Campus destination block (e.g. 'Block_26_CSE', 'Block_1', 'Food_Square')")
