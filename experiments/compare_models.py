@@ -27,11 +27,13 @@ HORIZONS = {"H15": "+15 min", "H30": "+30 min", "H60": "+60 min"}
 
 
 def estimators():
-    """Candidate models; hyperparameters from model_config.yaml (+ tuned XGBoost)."""
+    """Candidate models. XGBoost appears twice: config defaults vs Optuna-tuned (configs/tuned_params.yaml)."""
     return {
         "Ridge": build_pipeline(Ridge(**xgb_params("ridge"))),
         "Random Forest": build_pipeline(RandomForestRegressor(**xgb_params("random_forest"))),
-        "XGBoost": build_pipeline(xgb.XGBRegressor(**xgb_params("xgboost_regressor"))),
+        "XGBoost (default)": build_pipeline(
+            xgb.XGBRegressor(**xgb_params("xgboost_regressor", tuned=False))),
+        "XGBoost (tuned)": build_pipeline(xgb.XGBRegressor(**xgb_params("xgboost_regressor"))),
         "LightGBM": build_pipeline(lgb.LGBMRegressor(
             n_estimators=200, learning_rate=0.04, max_depth=6, subsample=0.85,
             subsample_freq=1, colsample_bytree=0.8, random_state=42, verbose=-1)),
@@ -78,11 +80,11 @@ def main():
         # Stacking (Random Forest + XGBoost + LightGBM -> non-negative Ridge on validation)
         t0 = time.time()
         stack = BlendStackingRegressor(
-            {k: v for k, v in estimators().items() if k != "Ridge"}
+            {k: v for k, v in estimators().items() if k not in ("Ridge", "XGBoost (default)")}
         ).fit(tr.X, tr.y[hz], va.X, va.y[hz])
         secs = time.time() - t0
         # val score of a stack is optimistic (meta-learner saw val): report test only
-        add("Stacking (RF+XGB+LGBM)", hz, "test", te, stack.predict(te.X), secs)
+        add("Stacking (RF+XGB tuned+LGBM)", hz, "test", te, stack.predict(te.X), secs)
         print(f"  {'Stacking':14s} test MAE={rows[-1]['MAE']:.3f}  weights={ {k: float(v) for k, v in stack.weights_.items()} }")
 
     out = pd.DataFrame(rows)
