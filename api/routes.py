@@ -18,7 +18,8 @@ from typing import List, Dict, Any, Optional
 
 from api.schemas import PredictionRequest, PredictionResponse, RecommendationResponse, ZoneRankItem
 from recommendation.parking_ranker import ParkingRanker
-from models.inference import predict_zone, predict_all_zones, models_ready
+from models.inference import predict_zone, predict_all_zones, models_ready, _build_feature_row
+from models.history import HISTORY
 
 logger = logging.getLogger(__name__)
 _IST = ZoneInfo("Asia/Kolkata")
@@ -135,6 +136,40 @@ def predict_occupancy(req: PredictionRequest):
         confidence_level=confidence,
         lag_source=result.get("lag_source", "estimated"),
     )
+
+
+# ---------------------------------------------------------------------------
+# Explainability — SHAP breakdown of a single prediction
+# ---------------------------------------------------------------------------
+
+@router.get("/explain")
+def explain_prediction(
+    zone_id: str = Query(..., description="Zone to explain, e.g. ZONE_BLOCK1"),
+    current_count: int = Query(..., ge=0),
+    horizon_minutes: int = Query(15),
+    is_exam_day: bool = Query(False),
+    is_class_transition: bool = Query(False),
+):
+    """
+    Why did the model predict this? Returns the additive SHAP decomposition:
+    prediction = base_value + sum(effect_cars). Positive effects push the
+    forecast up (more cars), negative effects push it down.
+    """
+    if zone_id not in ZONES_MAP:
+        raise HTTPException(status_code=404, detail=f"Zone '{zone_id}' not found.")
+    if horizon_minutes not in (15, 30, 60):
+        raise HTTPException(status_code=422, detail="horizon_minutes must be 15, 30, or 60.")
+    if not models_ready()["loaded"]:
+        raise HTTPException(status_code=503, detail="Model artifacts not available.")
+    from models.explain import explain_row  # imported lazily: SHAP is heavy
+
+    cap = ZONES_MAP[zone_id]["operational_capacity"]
+    X, lag_source = _build_feature_row(
+        zone_id, current_count, cap, is_exam_day, is_class_transition,
+        datetime.now(_IST), history=HISTORY)
+    out = explain_row(X, {15: "H15", 30: "H30", 60: "H60"}[horizon_minutes])
+    return {"zone_id": zone_id, "horizon_minutes": horizon_minutes,
+            "lag_source": lag_source, **out}
 
 
 # ---------------------------------------------------------------------------

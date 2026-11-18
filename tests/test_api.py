@@ -204,3 +204,17 @@ def test_favicon_served():
     assert res.status_code == 200
     assert res.headers["content-type"] in ("image/x-icon", "image/vnd.microsoft.icon",
                                            "image/ico", "application/octet-stream")
+
+
+def test_explain_endpoint_is_additive():
+    r = client.get("/api/explain", params={"zone_id": "ZONE_BLOCK1", "current_count": 80,
+                                           "horizon_minutes": 15})
+    assert r.status_code == 200
+    d = r.json()
+    total = d["base_value"] + sum(c["effect_cars"] for c in d["top_contributions"]) + d["other_effect_cars"]
+    assert abs(total - d["prediction"]) < 0.5      # SHAP is additive (rounding only)
+    assert d["top_contributions"][0]["feature"]
+
+
+def test_explain_unknown_zone_404():
+    assert client.get("/api/explain", params={"zone_id": "NOPE", "current_count": 1}).status_code == 404
