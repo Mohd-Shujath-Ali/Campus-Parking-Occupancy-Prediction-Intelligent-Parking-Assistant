@@ -15,9 +15,9 @@ This project delivers an end-to-end Machine Learning, Computer Vision, and Decis
 
 Unlike traditional marked-stall sensor systems, this architecture addresses **open, unstructured campus grounds** using:
 1. **Perception**: Fine-tuned YOLO (`best.pt`) with Ground-Contact Point Jordan Ray-Casting Point-in-Polygon (PIP) and cross-camera Global Spatial NMS ($d < 2.5\text{m}$).
-2. **Zero-Leakage Time-Series Pipeline**: Multi-horizon forecasting ($+15, +30, +60$ min) with a chronological 70/15/15 split (1 h buffer), 22 causal features: sin/cos time, zone identity, event/exam flags, lags ($t-15 \dots t-60$), velocity and shifted rolling statistics. Hyperparameters live in `configs/model_config.yaml`.
-3. **Dual-Head Architecture**: Direct XGBoost Regressor per horizon paired with a Saturation Classifier ($P(\text{Occ} \ge 90\%)$) that handles class imbalance with `scale_pos_weight`.
-4. **Inflection-Hour Evaluation**: On the simulated data, XGBoost cuts persistence MAE by roughly 59% inside $\pm 15$ minute class-transition windows (see Section 6 for caveats).
+2. **Zero-Leakage Time-Series Pipeline**: Multi-horizon forecasting ($+15, +30, +60$ min) with a chronological 70/15/15 split (1 h buffer), 22 causal features: sin/cos time, zone identity, event/exam flags, lags ($t-15 \dots t-60$), velocity and shifted rolling statistics. Hyperparameters live in `configs/model_config.yaml` (Optuna-tuned overrides in `configs/tuned_params.yaml`).
+3. **Dual-Head Architecture**: Direct XGBoost Regressor per horizon paired with a Saturation Classifier ($P(\text{Occ} \ge 90\%)$) that handles class imbalance with `scale_pos_weight` and is isotonic-calibrated on the validation period.
+4. **Inflection-Hour Evaluation**: On the simulated data, XGBoost cuts persistence MAE by roughly 67% inside $\pm 15$ minute class-transition windows (see Section 6 for caveats).
 5. **Anti-Herding Dispatcher**: Recommendation ranker that picks the lead lot among near-tied zones with softmax($\text{score}/\beta$) probabilities, so drivers are spread across equivalent lots.
 6. **Full-Stack Web Microservice**: High-performance asynchronous **FastAPI** backend with unified responsive **TailwindCSS & Chart.js** web interface (no Streamlit).
 
@@ -82,7 +82,16 @@ python -m uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
 - **Web App**: Open `http://localhost:8000/` in your browser for the responsive Driver Assistant & Campus Estate Console.
 - **REST API Docs**: Open `http://localhost:8000/docs` for interactive Swagger documentation.
 
-### 3. Run Unit & Integration Tests
+### 3. Reproduce the experiments
+```bash
+python -m experiments.compare_models   # Ridge / RF / XGBoost / LightGBM / stacking vs baselines
+python -m experiments.tune_xgboost     # Optuna TPE vs random search, TimeSeriesSplit CV -> configs/tuned_params.yaml
+python -m models.train                 # fits + saves the deployed sklearn Pipelines (uses tuned params)
+python -m experiments.error_analysis   # per-zone / hour / regime errors, worst cases, classifier calibration
+python -m experiments.explain          # SHAP global + local explanations
+```
+
+### 4. Run Unit & Integration Tests
 ```bash
 pytest tests/ -v
 ```
@@ -94,6 +103,7 @@ pytest tests/ -v
 - `GET /`: Serves the responsive web application dashboard.
 - `GET /api/health`: System status, active zones count, forecast horizons.
 - `GET /api/zones`: Full metadata for all 12 LPU parking grounds.
+- `GET /api/explain?zone_id=ZONE_BLOCK1&current_count=80`: SHAP breakdown of a forecast (base value + per-feature effect in cars).
 - `POST /api/predict`: Forecast occupancy for given zone, current count, and horizon (+15, +30, +60 min).
 - `GET /api/recommendations?destination=Block_26_CSE&horizon_minutes=15`: Returns ranked viable parking grounds with walking distance, arrival availability, and smart tips.
 
@@ -105,21 +115,28 @@ pytest tests/ -v
 
 **Vision data.** The YOLO training images in `collab_content_backup/LPU---Parking-1` come from a Roboflow export (licence CC BY 4.0, see its `README.roboflow.txt`). The image file names follow the timestamp pattern of the public PKLot dataset, so confirm the original source and cite it before submission.
 
-**Current results** (chronological hold-out, +15 min unless stated; simulated data):
+**Current results** (chronological hold-out, +15 min unless stated; simulated data; full write-up in [`docs/results.md`](docs/results.md)):
 
 | Model | MAE (cars) | RMSE | R² | MAE in bell windows |
 | :--- | :---: | :---: | :---: | :---: |
 | Persistence | 6.63 | 10.12 | 0.979 | 15.33 |
-| Seasonal mean (zone × weekday × hour) | 6.35 | 9.93 | 0.980 | n/a |
-| XGBoost +15 min | 4.21 | 5.69 | 0.994 | 6.28 |
-| XGBoost +30 min | 4.49 | 6.08 | 0.993 | n/a |
-| XGBoost +60 min | 4.96 | 6.84 | 0.991 | n/a |
+| Seasonal mean (zone x weekday x hour) | 6.35 | 9.93 | 0.980 | 12.95 |
+| Ridge | 6.13 | 9.16 | 0.983 | 15.29 |
+| Random Forest | 4.16 | 5.68 | 0.994 | 7.34 |
+| LightGBM | 4.41 | 6.01 | 0.993 | 6.89 |
+| XGBoost (config defaults) | 4.21 | 5.71 | 0.993 | 6.32 |
+| Stacking (RF + tuned XGB + LGBM) | 3.94 | 5.34 | 0.994 | 6.03 |
+| **XGBoost (Optuna-tuned)** | **3.68** | **4.95** | **0.995** | **5.05** |
 
-The generator noise alone leaves an irreducible error of roughly 3-4 cars, so XGBoost is already close to the ceiling. The zone-aware seasonal mean is a strong baseline: the earlier 40-car MAE came from averaging all zones together.
+Tuned XGBoost: 3.72 / 3.79 MAE at +30 / +60 min (persistence 9.46 / 14.84). Bayesian search beat random search with the same 30-trial budget (CV MAE 4.43 vs 4.50). The best a forecaster could do on this simulator (noise-free oracle) is 3.38 cars, so the model is within ~0.3 cars of the ceiling and the data, not the model, is now the limiting factor. The saturation classifier is isotonic-calibrated on the validation period (precision 0.87, recall 0.75, PR-AUC 0.90 at threshold 0.5).
+
+**Explainability.** SHAP (global, dependence and local plots in `artifacts/figures/shap_*.png`, interpretation in `docs/results.md`); live per-prediction breakdown at `GET /api/explain`.
+
+**EDA.** [`notebooks/01_eda.ipynb`](notebooks/01_eda.ipynb) (data quality, distributions, daily/weekly patterns, special regimes, autocorrelation, class imbalance, split composition).
 
 **Serving.** `/api/predict` builds lags from a rolling per-zone history (`models/history.py`) and returns `lag_source` (`observed`, `partial` or `estimated`). Counts in `/api/recommendations` are simulated demo values (`count_source: simulated`) until the camera counter feeds the history buffer.
 
-**Not yet done:** hyperparameter search / cross-validation, additional model comparisons (Ridge, Random Forest, stacking), SHAP explanations, error analysis and an EDA notebook.
+**Not yet done:** real (logged) occupancy data, uncertainty intervals, demand-forecasting and admin heatmap modules, public deployment, rolling-origin evaluation that holds out an exam week.
 
 ---
 
