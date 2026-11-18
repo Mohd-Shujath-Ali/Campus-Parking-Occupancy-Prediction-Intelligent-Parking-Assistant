@@ -35,3 +35,19 @@ def test_unseen_zone_code_does_not_crash():
     pipe = build_pipeline(xgb.XGBRegressor(n_estimators=5)).fit(X, y)
     X2 = X.head(3).copy(); X2["zone_code"] = -1  # unknown zone at serving time
     assert len(pipe.predict(X2)) == 3
+
+
+def test_saturation_classifier_is_calibrated_on_validation():
+    from models.classifier import SaturationClassifier
+    rng = np.random.default_rng(1)
+    def mk(n):
+        X, _ = _X(n, seed=int(rng.integers(1e6)))
+        y = pd.Series((X["occupancy_ratio"] + rng.normal(0, .15, n) > .9).astype(int))
+        return X, y
+    (Xt, yt), (Xv, yv), (Xs, ys) = mk(4000), mk(2000), mk(2000)
+    raw = SaturationClassifier(n_estimators=40).fit(Xt, yt)
+    cal = SaturationClassifier(n_estimators=40).fit(Xt, yt, Xv, yv)
+    # scale_pos_weight inflates raw probabilities; calibration brings the mean back to the base rate
+    gap_raw = abs(raw.predict_proba(Xs).mean() - ys.mean())
+    gap_cal = abs(cal.predict_proba(Xs).mean() - ys.mean())
+    assert gap_cal < gap_raw

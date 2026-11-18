@@ -2,6 +2,8 @@ import numpy as np
 import pandas as pd
 from typing import Dict, Any, Tuple
 import xgboost as xgb
+from sklearn.calibration import CalibratedClassifierCV
+from sklearn.frozen import FrozenEstimator
 from utils.config import xgb_params
 from models.pipeline import build_pipeline
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score, average_precision_score
@@ -16,16 +18,24 @@ class SaturationClassifier:
         self.params = {**xgb_params("xgboost_classifier"), **overrides}
         self.model = None
 
-    def fit(self, X_train: pd.DataFrame, y_train: pd.Series):
-        # Class imbalance handled with scale_pos_weight (neg/pos ratio)
+    def fit(self, X_train: pd.DataFrame, y_train: pd.Series,
+            X_val: pd.DataFrame = None, y_val: pd.Series = None):
+        # Class imbalance handled with scale_pos_weight (neg/pos ratio). This
+        # improves recall but inflates raw probabilities, so when a validation
+        # period is supplied the scores are recalibrated (isotonic) on it.
         pos_count = (y_train == 1).sum()
         neg_count = (y_train == 0).sum()
         scale_pos_weight = float(neg_count / max(1, pos_count))
 
         # Same preprocessing Pipeline as the regressors, persisted as one object
-        self.model = build_pipeline(
+        self.base = build_pipeline(
             xgb.XGBClassifier(scale_pos_weight=scale_pos_weight, **self.params))
-        self.model.fit(X_train, y_train)
+        self.base.fit(X_train, y_train)
+        self.model = self.base
+        if X_val is not None:
+            # Validation is chronologically after training and before test: leak-free
+            self.model = CalibratedClassifierCV(
+                FrozenEstimator(self.base), method="isotonic").fit(X_val, y_val)
         return self
 
     def predict(self, X: pd.DataFrame) -> np.ndarray:

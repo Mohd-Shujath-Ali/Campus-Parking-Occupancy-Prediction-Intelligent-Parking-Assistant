@@ -107,7 +107,7 @@ def run_training_pipeline():
     # 7. Train Dual-Head Saturation Classifier
     print("\n[Step 7] Training Dual-Head Saturation Classifier P(Occ >= 90%)...")
     sat_clf = SaturationClassifier()
-    sat_clf.fit(X_train, targets_train["SAT15"])
+    sat_clf.fit(X_train, targets_train["SAT15"], X_val, targets_val["SAT15"])
     sat_preds  = sat_clf.predict(X_test)
     sat_probas = sat_clf.predict_proba(X_test)
     sat_eval   = sat_clf.evaluate(targets_test["SAT15"], sat_preds, sat_probas)
@@ -127,7 +127,7 @@ def run_training_pipeline():
     for horizon, model in xgb_forecaster.models.items():
         # models are Pipelines (preprocessing + XGBoost): export the XGBoost step
         model.named_steps["model"].get_booster().save_model(str(booster_dir / f"xgb_{horizon}.ubj"))
-    sat_clf.model.named_steps["model"].get_booster().save_model(str(booster_dir / "saturation_clf.ubj"))
+    sat_clf.base.named_steps["model"].get_booster().save_model(str(booster_dir / "saturation_clf.ubj"))
     print(f"\n[Step 8] Serialized joblib wrappers and portable .ubj boosters to artifacts/pipelines/")
 
     # 9. Build Comparison DataFrame
