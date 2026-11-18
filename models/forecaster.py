@@ -6,6 +6,8 @@ from sklearn.ensemble import RandomForestRegressor
 import xgboost as xgb
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
+from utils.config import xgb_params
+
 class MultiHorizonForecaster:
     """
     Manages direct multi-horizon estimators (H=15, H=30, H=60 minutes)
@@ -17,19 +19,13 @@ class MultiHorizonForecaster:
         self.horizons = ["H15", "H30", "H60"]
 
     def _get_estimator(self):
+        """Hyperparameters come from configs/model_config.yaml."""
         if self.model_type == "ridge":
-            return Ridge(alpha=1.0)
+            return Ridge(**xgb_params("ridge"))
         elif self.model_type == "random_forest":
-            return RandomForestRegressor(n_estimators=100, max_depth=10, random_state=42)
+            return RandomForestRegressor(**xgb_params("random_forest"))
         elif self.model_type == "xgboost":
-            return xgb.XGBRegressor(
-                n_estimators=150,
-                learning_rate=0.05,
-                max_depth=6,
-                subsample=0.8,
-                colsample_bytree=0.8,
-                random_state=42
-            )
+            return xgb.XGBRegressor(**xgb_params("xgboost_regressor"))
         else:
             raise ValueError(f"Unknown model_type: {self.model_type}")
 

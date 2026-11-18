@@ -11,12 +11,16 @@ from models.baselines import PersistenceForecaster, SeasonalHistoricalMeanForeca
 from models.forecaster import MultiHorizonForecaster
 from models.classifier import SaturationClassifier
 from evaluation.metrics import compute_regression_metrics, compute_inflection_metrics
+from utils.config import load_model_config
 
 
 def run_training_pipeline():
     print("=================================================================")
     print("   LPU CAMPUS PARKING INTELLIGENCE: END-TO-END TRAINING RUNNER   ")
     print("=================================================================")
+
+    cfg = load_model_config()
+    data_cfg, feat_cfg = cfg["data"], cfg["features"]
 
     # 1. Dataset Generation / Loading
     data_csv = "data/processed/lpu_timeseries.csv"
@@ -31,13 +35,22 @@ def run_training_pipeline():
 
     # 2. Chronological Split (70/15/15) — split BEFORE feature engineering to prevent leakage
     print("\n[Step 2] Executing Chronological Split with zero data leakage...")
-    splitter = ChronologicalSplitter(train_ratio=0.70, val_ratio=0.15, test_ratio=0.15, buffer_hours=1)
+    splitter = ChronologicalSplitter(
+        train_ratio=data_cfg["train_ratio"],
+        val_ratio=data_cfg["val_ratio"],
+        test_ratio=data_cfg["test_ratio"],
+        buffer_hours=data_cfg["chronological_buffer_hours"],
+    )
     df_train, df_val, df_test = splitter.split_dataframe(df_raw)
     print(f"Train Records: {len(df_train)} | Val Records: {len(df_val)} | Holdout Test Records: {len(df_test)}")
 
     # 3. Feature Pipeline Transformation — groupby(zone_id) prevents cross-zone lag bleed
     print("\n[Step 3] Building Causal Lags, Velocity, Shifted Rolling Windows, and Cyclics...")
-    feat_pipe = TimeSeriesFeaturePipeline(lag_minutes=[15, 30, 45, 60], rolling_windows_minutes=[30, 60])
+    feat_pipe = TimeSeriesFeaturePipeline(
+        lag_minutes=feat_cfg["lag_minutes"],
+        rolling_windows_minutes=feat_cfg["rolling_windows_minutes"],
+        saturation_threshold=feat_cfg["saturation_threshold"],
+    )
 
     # Each split transformed independently (no data flowing across the temporal gap)
     train_transformed = feat_pipe.transform_zone_series(df_train)
@@ -87,7 +100,9 @@ def run_training_pipeline():
     xgb_infl  = compute_inflection_metrics(targets_test["H15"].values, preds["H15"], X_test["is_class_transition"].values)
 
     print(f"Persistence Inflection MAE (Rush Hours): {pers_infl['MAE_Rush_Inflection']} cars")
-    print(f"XGBoost Inflection MAE (Rush Hours):     {xgb_infl['MAE_Rush_Inflection']} cars  <-- (~40%+ error reduction!)")
+    pers_r, xgb_r = pers_infl["MAE_Rush_Inflection"], xgb_infl["MAE_Rush_Inflection"]
+    reduction = 100.0 * (pers_r - xgb_r) / pers_r if pers_r else 0.0
+    print(f"XGBoost Inflection MAE (Rush Hours):     {xgb_r} cars  ({reduction:.1f}% lower than persistence)")
 
     # 7. Train Dual-Head Saturation Classifier
     print("\n[Step 7] Training Dual-Head Saturation Classifier P(Occ >= 90%)...")
