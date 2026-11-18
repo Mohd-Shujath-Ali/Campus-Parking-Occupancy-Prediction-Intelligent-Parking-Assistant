@@ -165,7 +165,7 @@ def run_training_pipeline():
     # 8. Export Model Artifacts
     os.makedirs("artifacts/pipelines", exist_ok=True)
     joblib.dump(ridge_forecaster, "artifacts/pipelines/ridge_forecaster.joblib")
-    joblib.dump(rf_forecaster,    "artifacts/pipelines/rf_forecaster.joblib")
+    joblib.dump(rf_forecaster,    "artifacts/pipelines/rf_forecaster.joblib", compress=3)
     joblib.dump(xgb_forecaster,   "artifacts/pipelines/xgb_multi_horizon.joblib")
     joblib.dump(sat_clf,          "artifacts/pipelines/saturation_classifier.joblib")
 

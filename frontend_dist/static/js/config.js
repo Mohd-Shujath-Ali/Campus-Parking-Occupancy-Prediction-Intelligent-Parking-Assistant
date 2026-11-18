@@ -7,7 +7,13 @@
 
     // 1. Determine active backend URL
     const STORAGE_KEY = 'LPU_PARKING_API_BASE';
-    const stored = localStorage.getItem(STORAGE_KEY);
+    let stored = localStorage.getItem(STORAGE_KEY);
+
+    // Auto-clean any legacy dummy placeholder URL from localStorage
+    if (stored && stored.includes('campus-parking-occupancy-prediction-intelligent.onrender.com')) {
+        localStorage.removeItem(STORAGE_KEY);
+        stored = null;
+    }
 
     let defaultBase = '';
     const host = window.location.hostname;
@@ -19,11 +25,11 @@
         defaultBase = window.__API_BASE__.replace(/\/+$/, '');
     } else if (host === 'localhost' || host === '127.0.0.1' || host === '') {
         // Localhost: If running directly on port 8000 (FastAPI), use relative; otherwise default to port 8000
-        defaultBase = (port === '8000') ? '' : 'http://127.0.0.1:8000';
+        defaultBase = (port === '8000' || port === '') ? '' : 'http://127.0.0.1:8000';
     } else {
-        // Deployed on Render Static Site or external host
-        // Fallback default: Render backend web service URL
-        defaultBase = 'https://campus-parking-occupancy-prediction-intelligent.onrender.com';
+        // Deployed on Render or any web domain:
+        // Default to same origin (relative path '') so it connects to the active deployment!
+        defaultBase = '';
     }
 
     window.API_BASE = defaultBase;
