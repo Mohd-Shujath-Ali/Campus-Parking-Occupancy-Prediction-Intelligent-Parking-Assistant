@@ -1,7 +1,34 @@
 import numpy as np
 import pandas as pd
 from typing import List, Tuple, Dict, Any
-from sklearn.base import BaseEstimator, TransformerMixin
+from functools import lru_cache
+
+from utils.config import load_zones_config
+
+# Single definition of the model input schema, shared by training and serving
+# so the two can never drift apart.
+FEATURE_COLS: List[str] = [
+    "vehicle_count", "operational_capacity", "occupancy_ratio",
+    "zone_code",
+    "hour_sin", "hour_cos", "day_sin", "day_cos", "is_weekend",
+    "is_exam_day", "is_campus_event", "is_class_transition",
+    "lag_15m", "lag_30m", "lag_45m", "lag_60m",
+    "delta_15m", "delta_30m",
+    "rolling_mean_30m", "rolling_std_30m",
+    "rolling_mean_60m", "rolling_std_60m",
+]
+
+
+@lru_cache(maxsize=1)
+def zone_order() -> Tuple[str, ...]:
+    """Stable zone ordering (sorted ids from zones.yaml)."""
+    return tuple(sorted(z["id"] for z in load_zones_config()["zones"]))
+
+
+def zone_code(zone_id: str) -> int:
+    """Integer code for a zone; -1 for an unknown zone."""
+    order = zone_order()
+    return order.index(zone_id) if zone_id in order else -1
 
 
 class TimeSeriesFeaturePipeline:
@@ -18,7 +45,9 @@ class TimeSeriesFeaturePipeline:
         self,
         lag_minutes: List[int] = [15, 30, 45, 60],
         rolling_windows_minutes: List[int] = [30, 60],
+        saturation_threshold: float = 0.90,
     ):
+        self.saturation_threshold = saturation_threshold
         self.lag_minutes = lag_minutes
         self.rolling_windows_minutes = rolling_windows_minutes
 
@@ -43,6 +72,12 @@ class TimeSeriesFeaturePipeline:
         df["day_sin"] = np.sin(2 * np.pi * dayofweek / 7.0)
         df["day_cos"] = np.cos(2 * np.pi * dayofweek / 7.0)
         df["is_weekend"] = (dayofweek >= 5).astype(int)
+
+        # Zone identity (constant within a zone) and optional event flag
+        zid = df["zone_id"].iloc[0] if "zone_id" in df.columns else None
+        df["zone_code"] = zone_code(zid) if zid is not None else -1
+        if "is_campus_event" not in df.columns:
+            df["is_campus_event"] = 0
 
         # 2. Capacity-Relative Anchor
         df["occupancy_ratio"] = df["vehicle_count"] / df["operational_capacity"]
@@ -70,9 +105,9 @@ class TimeSeriesFeaturePipeline:
         df["target_count_t30"] = df["vehicle_count"].shift(-(30 // cadence_minutes))
         df["target_count_t60"] = df["vehicle_count"].shift(-(60 // cadence_minutes))
 
-        # Binary Saturation Target (>= 90% capacity at +15m)
+        # Binary Saturation Target (>= saturation_threshold of capacity at +15m)
         df["target_saturated_t15"] = (
-            df["target_count_t15"] >= (df["operational_capacity"] * 0.90)
+            df["target_count_t15"] >= (df["operational_capacity"] * self.saturation_threshold)
         ).astype(int)
 
         return df
@@ -98,9 +133,12 @@ class TimeSeriesFeaturePipeline:
 
         if "zone_id" in df.columns and df["zone_id"].nunique() > 1:
             # Multi-zone path: apply per-zone, then concat
-            result = (
-                df.groupby("zone_id", group_keys=False)
-                .apply(self._transform_single_zone, cadence_minutes)
+            # Explicit loop (not groupby.apply): keeps the zone_id column on every
+            # pandas version (pandas>=3 drops grouping columns inside apply).
+            result = pd.concat(
+                [self._transform_single_zone(g, cadence_minutes)
+                 for _, g in df.groupby("zone_id", sort=True)],
+                ignore_index=True,
             )
             result = result.reset_index(drop=True)
         else:
@@ -115,19 +153,13 @@ class TimeSeriesFeaturePipeline:
         """
         Drops NaN rows created by lags and horizons, separates feature matrix X from targets.
         """
-        clean_df = df_features.dropna().copy().reset_index(drop=True)
+        target_cols = ["target_count_t15", "target_count_t30", "target_count_t60"]
+        clean_df = (
+            df_features.dropna(subset=FEATURE_COLS + target_cols)
+            .copy().reset_index(drop=True)
+        )
 
-        feature_cols = [
-            "vehicle_count", "operational_capacity", "occupancy_ratio",
-            "hour_sin", "hour_cos", "day_sin", "day_cos", "is_weekend",
-            "is_exam_day", "is_class_transition",
-            "lag_15m", "lag_30m", "lag_45m", "lag_60m",
-            "delta_15m", "delta_30m",
-            "rolling_mean_30m", "rolling_std_30m",
-            "rolling_mean_60m", "rolling_std_60m",
-        ]
-
-        X = clean_df[feature_cols]
+        X = clean_df[FEATURE_COLS]
         targets = {
             "H15": clean_df["target_count_t15"],
             "H30": clean_df["target_count_t30"],
