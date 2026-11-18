@@ -94,9 +94,17 @@
             <h2 class="text-2xl font-black">YOLO Perception &amp; Interactive ROI Studio</h2>
             <p class="text-slate-300 text-xs sm:text-sm max-w-xl mt-1">Live webcam inference and dual-model domain adaptation benchmarking (fine-tuned <code class="text-orange-400">best.pt</code> vs pretrained <code class="text-sky-400">yolo26l.pt</code>).</p>
         </div>
-        <div class="flex items-center space-x-2 bg-white/10 px-4 py-2 rounded-xl text-xs border border-white/10 backdrop-blur-sm">
-            <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
-            <span class="font-medium">YOLO Engine Ready (mAP50 = 91.6%)</span>
+        <div class="flex flex-col sm:flex-row items-end sm:items-center gap-2">
+            <!-- Hardware Acceleration Status -->
+            <div id="hardwareAccelBadge" class="flex items-center space-x-2 bg-white/10 px-3.5 py-1.5 rounded-xl text-xs border border-white/10 backdrop-blur-sm">
+                <i class="fa-solid fa-bolt text-emerald-400"></i>
+                <span id="hardwareAccelText" class="font-medium">WebGPU / Client Hardware Active</span>
+            </div>
+            <!-- Mode Selector -->
+            <select id="executionModeSelect" class="bg-black/40 text-white text-xs border border-white/20 rounded-xl px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-orange-400">
+                <option value="client" selected>⚡ Client Hardware (WebGPU / WASM)</option>
+                <option value="server">🌐 Server / Local API</option>
+            </select>
         </div>
     </div>
 
@@ -331,6 +339,8 @@ async function probeGlobalHealth() {
 document.addEventListener('DOMContentLoaded', probeGlobalHealth);
 </script>
 
+<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort.all.min.js"></script>
+<script src="/static/js/client_yolo.js"></script>
 <script src="/static/js/vision.js"></script>
 
 </body>
