@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Campus Grounds & Parking Topology — LPU Smart Parking</title>
+    <link rel="icon" href="/favicon.ico" type="image/x-icon">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/css/styles.css">
+    <script src="/static/js/config.js"></script>
+    
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col font-sans">
+
+<!-- ═══════════════════════════ GLOBAL HEADER ═══════════════════════════ -->
+<header class="bg-white border-b border-slate-200 sticky top-0 z-50 shadow-sm">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex justify-between items-center h-16">
+        <!-- Brand / Logo -->
+        <a href="/" class="flex items-center space-x-3 group">
+            <div class="h-11 w-11 rounded-xl bg-white p-1 border border-slate-200 shadow-sm flex items-center justify-center overflow-hidden transition-transform group-hover:scale-105">
+                <img src="/static/lpu_logo.png" alt="LPU Logo" class="h-full w-full object-contain">
+            </div>
+            <div>
+                <h1 class="text-base sm:text-lg font-black text-slate-900 leading-tight">LPU Smart Parking</h1>
+                <p class="text-[11px] text-slate-500 font-medium">Lovely Professional University · Punjab</p>
+            </div>
+        </a>
+
+        <!-- Desktop Navigation Bar -->
+        <nav class="hidden md:flex items-center space-x-1 bg-slate-100 p-1.5 rounded-xl border border-slate-200 text-xs font-bold">
+            <a href="/" class="px-3.5 py-1.5 rounded-lg transition-all flex items-center space-x-1.5 text-slate-600 hover:text-slate-900">
+                <i class="fa-solid fa-car"></i><span>Driver Assistant</span>
+            </a>
+            <a href="/admin" class="px-3.5 py-1.5 rounded-lg transition-all flex items-center space-x-1.5 text-slate-600 hover:text-slate-900">
+                <i class="fa-solid fa-shield-halved"></i><span>Estate Console</span>
+            </a>
+            <a href="/vision" class="px-3.5 py-1.5 rounded-lg transition-all flex items-center space-x-1.5 text-slate-600 hover:text-slate-900">
+                <i class="fa-solid fa-video"></i><span>Vision AI Lab</span>
+            </a>
+            <a href="/analytics" class="px-3.5 py-1.5 rounded-lg transition-all flex items-center space-x-1.5 text-slate-600 hover:text-slate-900">
+                <i class="fa-solid fa-chart-line"></i><span>Benchmarks</span>
+            </a>
+            <a href="/zones" class="px-3.5 py-1.5 rounded-lg transition-all flex items-center space-x-1.5 bg-white text-orange-600 shadow-sm">
+                <i class="fa-solid fa-map-location-dot"></i><span>Campus Grounds</span>
+            </a>
+        </nav>
+
+        <!-- Right Side: Health Indicator & Mobile Menu Toggle -->
+        <div class="flex items-center space-x-3">
+            <div id="systemStatusDot" class="hidden sm:flex items-center space-x-2 text-xs text-slate-600 bg-slate-50 px-3 py-1.5 rounded-full border border-slate-200">
+                <span class="w-2 h-2 rounded-full bg-slate-300" id="statusDot"></span>
+                <span id="statusLabel" class="font-medium text-[11px]">Connecting…</span>
+            </div>
+
+            <!-- Mobile Menu Button -->
+            <button onclick="toggleMobileNav()" class="md:hidden p-2 rounded-lg text-slate-600 hover:bg-slate-100 border border-slate-200">
+                <i class="fa-solid fa-bars text-sm"></i>
+            </button>
+        </div>
+    </div>
+
+    <!-- Mobile Navigation Dropdown -->
+    <div id="mobileNavMenu" class="hidden md:hidden border-t border-slate-200 bg-white px-4 py-3 space-y-1 text-sm font-semibold">
+        <a href="/" class="block px-3 py-2 rounded-lg text-slate-600 hover:bg-slate-50">
+            <i class="fa-solid fa-car w-5"></i> Driver Assistant
+        </a>
+        <a href="/admin" class="block px-3 py-2 rounded-lg text-slate-600 hover:bg-slate-50">
+            <i class="fa-solid fa-shield-halved w-5"></i> Estate Console
+        </a>
+        <a href="/vision" class="block px-3 py-2 rounded-lg text-slate-600 hover:bg-slate-50">
+            <i class="fa-solid fa-video w-5"></i> Vision AI Lab
+        </a>
+        <a href="/analytics" class="block px-3 py-2 rounded-lg text-slate-600 hover:bg-slate-50">
+            <i class="fa-solid fa-chart-line w-5"></i> Benchmarks
+        </a>
+        <a href="/zones" class="block px-3 py-2 rounded-lg bg-orange-50 text-orange-600">
+            <i class="fa-solid fa-map-location-dot w-5"></i> Campus Grounds
+        </a>
+    </div>
+</header>
+
+<!-- ═══════════════════════════ MAIN CONTENT ═══════════════════════════ -->
+<main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+    
+<section class="space-y-6">
+    <!-- Header -->
+    <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col sm:flex-row justify-between sm:items-center gap-3">
+        <div>
+            <h2 class="text-xl font-black text-slate-900 flex items-center space-x-2">
+                <i class="fa-solid fa-map-location-dot text-orange-600"></i>
+                <span>Monitored Campus Parking Grounds &amp; Topology</span>
+            </h2>
+            <p class="text-xs text-slate-500 mt-0.5">Empirically calibrated across Lovely Professional University's 600-acre campus in Phagwara, Punjab.</p>
+        </div>
+        <span class="text-xs font-semibold px-3 py-1.5 bg-orange-50 text-orange-700 rounded-xl border border-orange-200">
+            12 Calibrated Grounds · Aerial Survey
+        </span>
+    </div>
+
+    <!-- Real-Time Congestion Heatmap Grid (12 Zones) -->
+    <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-3">
+        <div class="flex flex-col sm:flex-row justify-between sm:items-center border-b border-slate-100 pb-3 gap-2">
+            <div>
+                <h3 class="font-bold text-slate-900 text-sm flex items-center space-x-2">
+                    <i class="fa-solid fa-fire-flame-curved text-orange-600"></i>
+                    <span>Campus-Wide Congestion Heatmap (Real-Time Snapshot)</span>
+                </h3>
+                <p class="text-xs text-slate-500">Live occupancy ratio, operational capacity, and congestion status across all 12 zones</p>
+            </div>
+            <div class="flex items-center space-x-3 text-xs">
+                <span class="flex items-center space-x-1.5"><span class="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block"></span><span class="text-slate-600">&lt;65% Free</span></span>
+                <span class="flex items-center space-x-1.5"><span class="w-2.5 h-2.5 rounded-full bg-amber-500 inline-block"></span><span class="text-slate-600">65-85% Moderate</span></span>
+                <span class="flex items-center space-x-1.5"><span class="w-2.5 h-2.5 rounded-full bg-rose-500 inline-block"></span><span class="text-slate-600">&gt;85% Saturated</span></span>
+                <span id="heatmapTimestamp" class="font-mono text-slate-400 pl-2">Live</span>
+            </div>
+        </div>
+        <div id="heatmapGrid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3 pt-2">
+            <div class="col-span-full py-4 text-center text-xs text-slate-400">Loading live zone snapshot…</div>
+        </div>
+    </div>
+
+    <!-- Grounds Directory Grid -->
+    <div id="zonesGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+        <div class="p-10 text-center text-slate-400 bg-white rounded-2xl border border-slate-200 col-span-full">
+            <i class="fa-solid fa-spinner fa-spin text-2xl text-orange-600 mb-2"></i>
+            <p class="text-sm font-medium">Loading campus parking grounds directory…</p>
+        </div>
+    </div>
+</section>
+
+</main>
+
+<script>
+function toggleMobileNav() {
+    const el = document.getElementById('mobileNavMenu');
+    if (el) el.classList.toggle('hidden');
+}
+
+// Global System Health Probe
+async function probeGlobalHealth() {
+    try {
+        const url = (window.apiUrl ? window.apiUrl('/api/health') : '/api/health');
+        const res = await fetch(url);
+        if (!res.ok) throw new Error('API Offline');
+        const data = await res.json();
+        const dot = document.getElementById('statusDot');
+        const lbl = document.getElementById('statusLabel');
+        const ml  = data.ml_model?.xgboost_loaded;
+        const cv  = data.yolo_model?.loaded;
+        if (dot && lbl) {
+            dot.className = `w-2 h-2 rounded-full ${ml ? 'bg-emerald-500' : 'bg-amber-500'}`;
+            lbl.textContent = ml && cv
+                ? 'XGBoost + YOLO Online'
+                : ml ? 'XGBoost ✓ YOLO ready'
+                : 'API Connected';
+        }
+    } catch {
+        const dot = document.getElementById('statusDot');
+        const lbl = document.getElementById('statusLabel');
+        if (dot) dot.className = 'w-2 h-2 rounded-full bg-rose-500';
+        if (lbl) lbl.textContent = 'API Offline';
+    }
+}
+document.addEventListener('DOMContentLoaded', probeGlobalHealth);
+</script>
+
+<script src="/static/js/zones.js"></script>
+
+</body>
+</html>

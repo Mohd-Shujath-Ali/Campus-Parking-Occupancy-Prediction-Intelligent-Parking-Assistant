@@ -226,3 +226,87 @@ def test_predict_returns_interval_containing_point_forecast():
     d = r.json()
     assert d["predicted_low"] is not None
     assert d["predicted_low"] <= d["predicted_vehicle_count"] <= d["predicted_high"]
+
+
+# ─────────────────────────── Anti-Herding & Navigation ────────
+
+def test_navigate_endpoint():
+    res = client.post("/api/navigate", json={"zone_id": "ZONE_BLOCK1"})
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "DISPATCH_REGISTERED"
+    assert data["zone_id"] == "ZONE_BLOCK1"
+    assert data["active_in_flight_count"] >= 1
+
+
+def test_navigate_invalid_zone():
+    res = client.post("/api/navigate", json={"zone_id": "ZONE_UNKNOWN_XYZ"})
+    assert res.status_code == 404
+
+
+# ─────────────────────────── SHAP & Figures ───────────────────
+
+def test_shap_figure_endpoint():
+    res = client.get("/api/shap-figure/shap_summary_beeswarm.png")
+    assert res.status_code == 200
+    assert res.headers["content-type"] == "image/png"
+    assert len(res.content) > 1000
+
+
+def test_shap_figure_whitelist_guard():
+    res = client.get("/api/shap-figure/unauthorized_file.png")
+    assert res.status_code == 404
+
+
+# ─────────────────────────── CV Quality & Edge Guard ──────────
+
+def test_image_quality_assessment():
+    import numpy as np
+    from computer_vision.detection import assess_image_quality
+
+    # Underexposed (black frame)
+    black_img = np.zeros((100, 100, 3), dtype=np.uint8)
+    q_black = assess_image_quality(black_img)
+    assert q_black["is_degraded"] is True
+    assert any("underexposure" in r.lower() for r in q_black["reasons"])
+
+    # Normal illuminated frame
+    normal_img = np.random.randint(60, 180, (100, 100, 3), dtype=np.uint8)
+    q_norm = assess_image_quality(normal_img)
+    assert q_norm["mean_brightness"] >= 50.0
+
+
+# ─────────────────────────── Edge Case Hardening ──────────────
+
+def test_prediction_naive_iso_timestamp():
+    """Verify offset-naive timestamps do not trigger datetime subtraction exceptions."""
+    payload = {
+        "zone_id": "ZONE_BLOCK1",
+        "horizon_minutes": 15,
+        "current_count": 85,
+        "timestamp": "2026-11-18T10:00:00"  # Note: No +05:30 offset
+    }
+    res = client.post("/api/predict", json=payload)
+    assert res.status_code == 200
+    data = res.json()
+    assert data["predicted_vehicle_count"] >= 0
+
+
+def test_recommendation_fuzzy_destination():
+    """Verify space/case insensitive destination resolution."""
+    for dest_query in ("block 26 cse", "BLOCK_26_CSE", "Block 26 CSE"):
+        res = client.get(f"/api/recommendations?destination={dest_query}&horizon_minutes=15")
+        assert res.status_code == 200, f"Failed for {dest_query}: {res.text}"
+        data = res.json()
+        assert data["destination"] == "Block_26_CSE"
+        assert len(data["recommended_zones"]) > 0
+
+
+def test_navigate_capacity_cap():
+    """Verify repeated navigation dispatches don't infinitely starve capacity beyond 35%."""
+    # Zone ZONE_BLOCK1 has operational capacity 150 -> 35% cap is 52
+    for _ in range(60):
+        res = client.post("/api/navigate", json={"zone_id": "ZONE_BLOCK1"})
+        assert res.status_code in (200, 429)  # 200 within limit, or 429 once rate limit reached
+        if res.status_code == 200:
+            assert res.json()["active_in_flight_count"] <= 55

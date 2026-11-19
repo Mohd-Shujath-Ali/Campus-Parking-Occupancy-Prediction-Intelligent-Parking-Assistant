@@ -43,14 +43,21 @@ class MultiCameraOccupancyCounter:
 
             current = sorted_dets[i]
             retained.append(current)
-            gx1, gy1 = current["ground_coords"]
+
+            coords1 = current.get("ground_coords")
+            if coords1 is None or len(coords1) < 2:
+                continue
+            gx1, gy1 = coords1[0], coords1[1]
 
             for j in range(i + 1, len(sorted_dets)):
                 if j in suppressed_indices:
                     continue
 
                 candidate = sorted_dets[j]
-                gx2, gy2 = candidate["ground_coords"]
+                coords2 = candidate.get("ground_coords")
+                if coords2 is None or len(coords2) < 2:
+                    continue
+                gx2, gy2 = coords2[0], coords2[1]
 
                 # Calculate ground Euclidean distance in meters
                 dist = np.sqrt((gx1 - gx2) ** 2 + (gy1 - gy2) ** 2)

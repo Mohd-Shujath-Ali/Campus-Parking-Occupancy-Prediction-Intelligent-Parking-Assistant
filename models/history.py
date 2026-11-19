@@ -10,11 +10,19 @@ from collections import defaultdict, deque
 from datetime import datetime, timedelta
 from threading import Lock
 from typing import Deque, Dict, List, Optional, Tuple
+from zoneinfo import ZoneInfo
+
+_IST = ZoneInfo("Asia/Kolkata")
 
 CADENCE_MIN = 5
 RETENTION_MIN = 120
 # An observation counts for a lag slot if within this tolerance of the slot time
 TOLERANCE_S = 150
+
+
+def naive_ist(ts: datetime) -> datetime:
+    """Campus-local (IST) wall-clock time without tzinfo. Naive input is assumed to be IST already."""
+    return ts.astimezone(_IST).replace(tzinfo=None) if ts.tzinfo else ts
 
 
 class ZoneHistory:
@@ -25,6 +33,7 @@ class ZoneHistory:
         self._lock = Lock()
 
     def record(self, zone_id: str, ts: datetime, count: int) -> None:
+        ts = naive_ist(ts)
         with self._lock:
             q = self._obs[zone_id]
             # Keep chronological order; ignore out-of-order older duplicates
@@ -48,11 +57,13 @@ class ZoneHistory:
         return best
 
     def lag(self, zone_id: str, ts: datetime, minutes: int) -> Optional[int]:
+        ts = naive_ist(ts)
         with self._lock:
             return self._at(zone_id, ts - timedelta(minutes=minutes))
 
     def window(self, zone_id: str, ts: datetime, minutes: int) -> List[int]:
         """Counts at t-5, t-10, ... t-minutes (the training rolling window)."""
+        ts = naive_ist(ts)
         with self._lock:
             vals = []
             for k in range(1, minutes // CADENCE_MIN + 1):
@@ -60,6 +71,22 @@ class ZoneHistory:
                 if v is not None:
                     vals.append(v)
             return vals
+
+
+    def is_frozen(self, zone_id: str, readings: int = 6, min_span_min: int = 10) -> bool:
+        """
+        Detects a frozen camera/video feed: the last `readings` observations are identical,
+        non-empty and span at least `min_span_min` minutes (so rapid polling cannot trigger it).
+        """
+        with self._lock:
+            q = self._obs.get(zone_id)
+            if not q or len(q) < readings:
+                return False
+            last = list(q)[-readings:]
+            if (last[-1][0] - last[0][0]).total_seconds() < min_span_min * 60:
+                return False
+            counts = {c for _, c in last}
+            return len(counts) == 1 and next(iter(counts)) > 0
 
 
 # Process-wide buffer shared by the API and the CV counter

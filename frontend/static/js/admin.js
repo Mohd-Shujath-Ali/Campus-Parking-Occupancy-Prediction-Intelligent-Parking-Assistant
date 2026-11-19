@@ -20,7 +20,8 @@ function setText(id, text) {
 
 async function refreshSnapshot() {
     try {
-        const res = await fetch('/api/snapshot');
+        const url = window.apiUrl ? window.apiUrl('/api/snapshot') : '/api/snapshot';
+        const res = await fetch(url);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         renderSnapshot(data);
@@ -171,6 +172,7 @@ function renderTelemetryTable(zones) {
                     <span class="w-1.5 h-1.5 rounded-full ${sc.dot} mr-1"></span>
                     ${statusLabel(z.status)}
                 </span>
+                ${z.stream_frozen ? '<span class="inline-flex items-center text-[10px] px-2 py-0.5 rounded bg-amber-100 text-amber-800 font-bold ml-1 border border-amber-300" title="Invariant sensor stream detected">⚠ Invariant</span>' : ''}
             </td>
         </tr>`;
     }).join('');
