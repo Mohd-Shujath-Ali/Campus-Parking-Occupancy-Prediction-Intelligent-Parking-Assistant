@@ -1,44 +1,38 @@
 # Render Infrastructure-as-Code Blueprint
-# Deploys Decoupled Architecture: Backend (Web Service) + Frontend (Static Site)
+#
+# Deploys ONE web service that serves the dashboards, the REST API and the browser-side YOLO model
+# from the same origin, so no CORS or API-base configuration is needed.
+#
+# Branch: testing. Change `branch` below to deploy another branch.
+#
+# Notes
+#  * requirements-render.txt is a lean, pinned runtime set (no torch/ultralytics/optuna/shap).
+#    Server-side YOLO (/api/detect-*) is therefore disabled; the in-browser ONNX YOLO on /vision works.
+#  * The model artefacts in artifacts/pipelines are committed pickles built with the pinned versions.
+#  * Memory: ~400 MB resident once all models are loaded, which fits a 512 MB instance with little
+#    headroom. If the service restarts with out-of-memory errors, move to a larger plan.
+#  * Collected camera counts (POST /api/ingest) are stored in SQLite on the instance's ephemeral disk
+#    and are lost on redeploy. Ingest requires the generated INGEST_API_KEY (see the Render dashboard).
 
 services:
-  # ─────────────────────────────────────────────────────────────
-  # 1. Backend Web Service: FastAPI + XGBoost + YOLO
-  # ─────────────────────────────────────────────────────────────
   - type: web
-    name: lpu-parking-api
+    name: lpu-parking
     runtime: python
     region: singapore
     plan: free
-    branch: main
-    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
+    branch: testing
+    buildCommand: pip install --upgrade pip && pip install -r requirements-render.txt
     startCommand: uvicorn api.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
     envVars:
       - key: PYTHON_VERSION
-        value: 3.11.9
-      - key: ALLOWED_ORIGINS
-        value: "*"
+        value: 3.13.5
+      - key: INGEST_API_KEY
+        generateValue: true
 
-  # ─────────────────────────────────────────────────────────────
-  # 2. Frontend Static Site: HTML5 + TailwindCSS + Chart.js
-  # ─────────────────────────────────────────────────────────────
-  - type: static
-    name: lpu-parking-frontend
-    buildCommand: pip install jinja2 && python scripts/build_static_frontend.py
-    staticPublishPath: frontend_dist
-    routes:
-      - type: rewrite
-        source: /admin
-        destination: /admin.html
-      - type: rewrite
-        source: /vision
-        destination: /vision.html
-      - type: rewrite
-        source: /analytics
-        destination: /analytics.html
-      - type: rewrite
-        source: /zones
-        destination: /zones.html
-      - type: rewrite
-        source: /*
-        destination: /index.html
+# ---------------------------------------------------------------------------------------------
+# Optional (not used by default): decoupled static frontend. Build it with
+#   BACKEND_URL=https://<your-api-host> python scripts/build_static_frontend.py
+# and publish `frontend_dist/` as a Render Static Site. The decoupled layout needs the backend URL
+# baked in at build time, which is why the default blueprint serves everything from one service.
+# ---------------------------------------------------------------------------------------------

@@ -112,7 +112,10 @@ python -m uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
 - **Campus Topology & Heatmap**: `http://localhost:8000/zones` (Live 12-zone congestion heatmap grid, grounds directory and per-zone usage profiles).
 - **Interactive REST Swagger**: `http://localhost:8000/docs`.
 
-### 5. Run Test Suite
+### 5. Deploy
+See [`docs/deployment.md`](docs/deployment.md): a Render blueprint (`render.yaml`, deploys the `testing` branch from the lean `requirements-render.txt`) or Docker.
+
+### 6. Run Test Suite
 ```bash
 pytest tests/ -v
 ```
