@@ -27,11 +27,12 @@ _IST = ZoneInfo("Asia/Kolkata")
 # ---------------------------------------------------------------------------
 _xgb_model = None
 _clf_model = None
+_int_model = None
 _load_error: Optional[str] = None
 
 
 def _load_models():
-    global _xgb_model, _clf_model, _load_error
+    global _xgb_model, _clf_model, _int_model, _load_error
     if _xgb_model is not None:
         return True
     try:
@@ -42,6 +43,8 @@ def _load_models():
             return False
         _xgb_model = joblib.load(xgb_path)
         _clf_model = joblib.load(clf_path)
+        int_path = Path("artifacts/pipelines/xgb_intervals.joblib")
+        _int_model = joblib.load(int_path) if int_path.exists() else None  # optional
         logger.info("XGBoost forecaster and saturation classifier loaded.")
         return True
     except Exception as e:
@@ -164,6 +167,7 @@ def predict_zone(
     if timestamp is None:
         timestamp = datetime.now(_IST)
     lag_source = "estimated"
+    low = high = None
 
     horizon_key_map = {15: "H15", 30: "H30", 60: "H60"}
     h_key = horizon_key_map.get(horizon_minutes, "H15")
@@ -173,6 +177,7 @@ def predict_zone(
         surge = 1.15 if is_class_transition else 1.02
         exam  = 1.10 if is_exam_day else 1.0
         pred_count = int(min(operational_capacity * 1.15, max(0, current_count * surge * exam)))
+        low = high = None
         sat_proba  = 0.5
         source     = "heuristic_fallback"
     else:
@@ -185,6 +190,10 @@ def predict_zone(
         pred_count = int(max(0, min(operational_capacity * 1.20, round(preds[h_key][0]))))
         sat_proba  = float(_clf_model.predict_proba(X)[0])
         source     = "xgboost_model"
+        if _int_model is not None:
+            lo, hi = _int_model.predict(X, h_key, point=np.array([pred_count], dtype=float))
+            low = int(max(0, np.floor(lo[0])))
+            high = int(min(operational_capacity * 1.20, np.ceil(hi[0])))
 
     # Remember this observation so later calls get real lags
     if record and history is not None:
@@ -198,6 +207,9 @@ def predict_zone(
 
     return {
         "predicted_vehicle_count": pred_count,
+        # 80% conformal prediction interval (None when the heuristic fallback is used)
+        "predicted_low":           low,
+        "predicted_high":          high,
         "operational_capacity":    operational_capacity,
         "available_spaces":        avail,
         "occupancy_rate":          occ_rate,

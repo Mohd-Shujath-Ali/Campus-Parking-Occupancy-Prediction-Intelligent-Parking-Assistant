@@ -14,6 +14,8 @@ class PredictionResponse(BaseModel):
     zone_name: str
     horizon_minutes: int
     predicted_vehicle_count: int
+    predicted_low: Optional[int] = None    # 80% prediction interval
+    predicted_high: Optional[int] = None
     operational_capacity: int
     available_spaces: int
     occupancy_rate: float

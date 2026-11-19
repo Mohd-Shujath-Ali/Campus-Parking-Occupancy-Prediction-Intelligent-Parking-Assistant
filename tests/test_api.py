@@ -218,3 +218,11 @@ def test_explain_endpoint_is_additive():
 
 def test_explain_unknown_zone_404():
     assert client.get("/api/explain", params={"zone_id": "NOPE", "current_count": 1}).status_code == 404
+
+
+def test_predict_returns_interval_containing_point_forecast():
+    r = client.post("/api/predict", json={"zone_id": "ZONE_BLOCK1", "current_count": 90,
+                                          "horizon_minutes": 30})
+    d = r.json()
+    assert d["predicted_low"] is not None
+    assert d["predicted_low"] <= d["predicted_vehicle_count"] <= d["predicted_high"]

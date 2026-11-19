@@ -11,6 +11,7 @@ from models.baselines import PersistenceForecaster, SeasonalHistoricalMeanForeca
 from models.forecaster import MultiHorizonForecaster
 from models.classifier import SaturationClassifier
 from evaluation.metrics import compute_regression_metrics, compute_inflection_metrics
+from models.intervals import PredictionIntervals
 from utils.config import load_model_config
 
 
@@ -113,6 +114,16 @@ def run_training_pipeline():
     sat_eval   = sat_clf.evaluate(targets_test["SAT15"], sat_preds, sat_probas)
     print(f"Saturation Classifier: Accuracy={sat_eval['Accuracy']}, Recall={sat_eval['Recall']}, PR_AUC={sat_eval['PR_AUC']}")
 
+    # 7b. Prediction intervals (conformalised quantile regression, calibrated on validation)
+    print("\n[Step 7b] Fitting conformal prediction intervals (80%)...")
+    intervals = PredictionIntervals(alpha=0.2).fit(X_train, targets_train, X_val, targets_val)
+    cov_rows = []
+    for h in intervals.horizons:
+        cov = intervals.coverage(X_test, targets_test[h], h)
+        cov_rows.append({"Horizon": h, "target_coverage": 0.80, **{k: round(v, 3) for k, v in cov.items()}})
+        print(f"  {h}: test coverage = {cov['coverage']:.3f} (target 0.80), mean width = {cov['mean_width']:.1f} cars")
+    pd.DataFrame(cov_rows).to_csv("artifacts/interval_coverage.csv", index=False)
+
     # 8. Export Model Artifacts
     # Persist wrappers via joblib (safe on the same runtime version).
     # Also save each inner XGBoost Booster in the portable .ubj format so the
@@ -120,6 +131,7 @@ def run_training_pipeline():
     os.makedirs("artifacts/pipelines", exist_ok=True)
     joblib.dump(xgb_forecaster, "artifacts/pipelines/xgb_multi_horizon.joblib")
     joblib.dump(sat_clf,        "artifacts/pipelines/saturation_classifier.joblib")
+    joblib.dump(intervals,      "artifacts/pipelines/xgb_intervals.joblib")
 
     # Portable Booster exports (cross-version safe)
     booster_dir = Path("artifacts/pipelines/boosters")
