@@ -434,7 +434,22 @@ def get_campus_snapshot(
 
     campus_occ_rate = round(total_occupied / total_capacity, 4) if total_capacity > 0 else 0.0
 
+    alerts = []
+    for z in zones_data:
+        base = {"zone_id": z["zone_id"], "name": z["name"]}
+        if z["occupancy_rate"] >= 0.90:
+            alerts.append({**base, "severity": "critical", "type": "SATURATED",
+                           "message": f"{z['name']} is forecast at {round(z['occupancy_rate'] * 100)}% of capacity."})
+        elif z["saturation_probability"] >= 0.70:
+            alerts.append({**base, "severity": "warning", "type": "SATURATION_RISK",
+                           "message": f"{z['name']}: {round(z['saturation_probability'] * 100)}% chance of reaching 90% within 15 minutes."})
+        if z["camera_status"] != "live" or z["camera_age_seconds"] > 300:
+            alerts.append({**base, "severity": "warning", "type": "STALE_CAMERA",
+                           "message": f"{z['name']}: camera data is stale ({round(z['camera_age_seconds'])}s old)."})
+    alerts.sort(key=lambda a: a["severity"] != "critical")
+
     return {
+        "alerts": alerts,
         "timestamp": now.isoformat(),
         "total_capacity": total_capacity,
         "total_occupied": total_occupied,
@@ -470,7 +485,10 @@ def get_model_metrics():
                 r[k] = None  # clean NaN for JSON
 
     xgb_h15 = df[(df["Model"] == "Tuned XGBoost") & (df["Horizon"] == "+15 min")]
+    sat_path = "artifacts/saturation_metrics.json"
+    saturation = json.load(open(sat_path)) if os.path.exists(sat_path) else None
     return {
+        "saturation": saturation,
         "models": records,
         "ml_ready": ml_status["loaded"],
         "xgboost_h15": {

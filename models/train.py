@@ -113,6 +113,9 @@ def run_training_pipeline():
     sat_preds  = sat_clf.predict(X_test)
     sat_probas = sat_clf.predict_proba(X_test)
     sat_eval   = sat_clf.evaluate(targets_test["SAT15"], sat_preds, sat_probas)
+    import json
+    with open("artifacts/saturation_metrics.json", "w") as f:
+        json.dump({**sat_eval, "threshold": 0.5, "calibrated": True}, f, indent=2)
     print(f"Saturation Classifier: Accuracy={sat_eval['Accuracy']}, Recall={sat_eval['Recall']}, PR_AUC={sat_eval['PR_AUC']}")
 
     # 7b. Prediction intervals (conformalised quantile regression, calibrated on validation)

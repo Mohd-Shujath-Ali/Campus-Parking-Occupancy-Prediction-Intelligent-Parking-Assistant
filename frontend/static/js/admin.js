@@ -53,8 +53,14 @@ function renderSnapshot(data) {
         tEl.textContent = `Updated: ${d.toLocaleTimeString()}`;
     }
 
-    renderBarChart(data.zones || []);
+    renderAlerts(data.alerts || []);
     renderTelemetryTable(data.zones || []);
+    try {
+        renderBarChart(data.zones || []);
+    } catch (err) {   // e.g. Chart.js CDN unreachable: keep the tables/alerts working
+        console.error('Chart unavailable:', err);
+        setText('chartLoading', 'Chart unavailable (Chart.js failed to load).');
+    }
 }
 
 function renderBarChart(zones) {
@@ -110,12 +116,35 @@ function renderBarChart(zones) {
     });
 }
 
+function renderAlerts(alerts) {
+    const list = document.getElementById('alertList');
+    if (!list) return;
+    setText('alertCount', `${alerts.length} active`);
+    if (alerts.length === 0) {
+        list.innerHTML = '<li class="text-emerald-600 font-semibold">No active alerts: all zones within normal range.</li>';
+        return;
+    }
+    list.replaceChildren(...alerts.map(a => {
+        const li = document.createElement('li');
+        const crit = a.severity === 'critical';
+        li.className = 'flex items-start space-x-2 p-2.5 rounded-xl border ' +
+            (crit ? 'bg-rose-50 border-rose-200 text-rose-800' : 'bg-amber-50 border-amber-200 text-amber-800');
+        const tag = document.createElement('span');
+        tag.className = 'font-bold uppercase text-[10px] tracking-wider shrink-0 mt-0.5';
+        tag.textContent = a.type.replace('_', ' ');
+        const msg = document.createElement('span');
+        msg.textContent = a.message;
+        li.append(tag, msg);
+        return li;
+    }));
+}
+
 function renderTelemetryTable(zones) {
     const tbody = document.getElementById('cameraTableBody');
     if (!tbody) return;
 
     if (zones.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="9" class="px-4 py-6 text-center text-slate-400">No telemetry records available.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="10" class="px-4 py-6 text-center text-slate-400">No telemetry records available.</td></tr>';
         return;
     }
 
@@ -132,6 +161,7 @@ function renderTelemetryTable(zones) {
             <td class="px-4 py-3 font-bold text-slate-700">${z.operational_capacity}</td>
             <td class="px-4 py-3 font-bold ${z.predicted_vehicle_count > z.operational_capacity * 0.9 ? 'text-rose-600' : 'text-slate-900'}">${z.predicted_vehicle_count}</td>
             <td class="px-4 py-3 font-bold text-emerald-600">${z.available_spaces}</td>
+            <td class="px-4 py-3 font-mono text-slate-500">${z.predicted_low != null ? `${z.predicted_low}–${z.predicted_high}` : '—'}</td>
             <td class="px-4 py-3">
                 <span class="font-bold ${satRiskPct > 70 ? 'text-rose-600' : 'text-slate-600'}">${satRiskPct}%</span>
             </td>
