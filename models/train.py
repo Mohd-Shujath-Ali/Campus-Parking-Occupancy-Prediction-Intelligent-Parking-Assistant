@@ -11,6 +11,8 @@ from models.baselines import PersistenceForecaster, SeasonalHistoricalMeanForeca
 from models.forecaster import MultiHorizonForecaster
 from models.classifier import SaturationClassifier
 from evaluation.metrics import compute_regression_metrics, compute_inflection_metrics
+from models.intervals import PredictionIntervals
+from models.demand import DemandForecaster, frame_from_raw
 from utils.config import load_model_config
 
 
@@ -107,11 +109,56 @@ def run_training_pipeline():
     # 7. Train Dual-Head Saturation Classifier
     print("\n[Step 7] Training Dual-Head Saturation Classifier P(Occ >= 90%)...")
     sat_clf = SaturationClassifier()
-    sat_clf.fit(X_train, targets_train["SAT15"])
+    sat_clf.fit(X_train, targets_train["SAT15"], X_val, targets_val["SAT15"])
     sat_preds  = sat_clf.predict(X_test)
     sat_probas = sat_clf.predict_proba(X_test)
     sat_eval   = sat_clf.evaluate(targets_test["SAT15"], sat_preds, sat_probas)
+    import json
+    with open("artifacts/saturation_metrics.json", "w") as f:
+        json.dump({**sat_eval, "threshold": 0.5, "calibrated": True}, f, indent=2)
     print(f"Saturation Classifier: Accuracy={sat_eval['Accuracy']}, Recall={sat_eval['Recall']}, PR_AUC={sat_eval['PR_AUC']}")
+
+    # 7b. Prediction intervals (conformalised quantile regression, calibrated on validation)
+    print("\n[Step 7b] Fitting conformal prediction intervals (80%)...")
+    intervals = PredictionIntervals(alpha=0.2).fit(X_train, targets_train, X_val, targets_val)
+    cov_rows = []
+    for h in intervals.horizons:
+        cov = intervals.coverage(X_test, targets_test[h], h)
+        cov_rows.append({"Horizon": h, "target_coverage": 0.80, **{k: round(v, 3) for k, v in cov.items()}})
+        print(f"  {h}: test coverage = {cov['coverage']:.3f} (target 0.80), mean width = {cov['mean_width']:.1f} cars")
+    pd.DataFrame(cov_rows).to_csv("artifacts/interval_coverage.csv", index=False)
+
+    # 7c. Demand forecaster (calendar-only, days ahead). Evaluate fitted-on-train vs the
+    # zone x weekday x hour seasonal mean, then refit on train+val for deployment so the
+    # campus-event days (which fall in the validation period) are learned.
+    print("\n[Step 7c] Demand forecaster (calendar features only)...")
+    dem_eval = DemandForecaster().fit(df_train)
+    y_ratio = (df_test["vehicle_count"] / df_test["operational_capacity"]).values
+    Xc = frame_from_raw(df_test)
+    p_dem = dem_eval.predict_ratio(Xc)
+    seas = SeasonalHistoricalMeanForecaster().fit(
+        frame_from_raw(df_train), df_train["vehicle_count"] / df_train["operational_capacity"])
+    p_seas = seas.predict(Xc)
+    # peak accuracy: per zone-day, is the predicted peak hour within +-1h of the actual one?
+    t = df_test.assign(y=y_ratio, dem=p_dem, seas=p_seas, d=df_test["timestamp"].dt.date,
+                       h=df_test["timestamp"].dt.hour)
+    hits = {"dem": [], "seas": []}
+    perr = {"dem": [], "seas": []}
+    for _, g in t.groupby(["zone_id", "d"]):
+        ah = g.loc[g.y.idxmax(), "h"]
+        for k in ("dem", "seas"):
+            hits[k].append(abs(g.loc[g[k].idxmax(), "h"] - ah) <= 1)
+            perr[k].append(abs(g[k].max() - g.y.max()))
+    dem_rows = []
+    for name, k, pred in (("Calendar XGBoost", "dem", p_dem), ("Seasonal mean", "seas", p_seas)):
+        dem_rows.append({"Model": name,
+                         "MAE_occupancy_pct": round(100 * float(np.abs(pred - y_ratio).mean()), 2),
+                         "RMSE_occupancy_pct": round(100 * float(np.sqrt(((pred - y_ratio) ** 2).mean())), 2),
+                         "peak_hour_within_1h": round(float(np.mean(hits[k])), 3),
+                         "peak_level_MAE_pct": round(100 * float(np.mean(perr[k])), 2)})
+        print("  ", dem_rows[-1])
+    pd.DataFrame(dem_rows).to_csv("artifacts/demand_evaluation.csv", index=False)
+    demand = DemandForecaster().fit(pd.concat([df_train, df_val]))
 
     # 8. Export Model Artifacts
     # Persist wrappers via joblib (safe on the same runtime version).
@@ -120,13 +167,16 @@ def run_training_pipeline():
     os.makedirs("artifacts/pipelines", exist_ok=True)
     joblib.dump(xgb_forecaster, "artifacts/pipelines/xgb_multi_horizon.joblib")
     joblib.dump(sat_clf,        "artifacts/pipelines/saturation_classifier.joblib")
+    joblib.dump(intervals,      "artifacts/pipelines/xgb_intervals.joblib")
+    joblib.dump(demand,         "artifacts/pipelines/demand_forecaster.joblib")
 
     # Portable Booster exports (cross-version safe)
     booster_dir = Path("artifacts/pipelines/boosters")
     booster_dir.mkdir(parents=True, exist_ok=True)
     for horizon, model in xgb_forecaster.models.items():
-        model.get_booster().save_model(str(booster_dir / f"xgb_{horizon}.ubj"))
-    sat_clf.model.get_booster().save_model(str(booster_dir / "saturation_clf.ubj"))
+        # models are Pipelines (preprocessing + XGBoost): export the XGBoost step
+        model.named_steps["model"].get_booster().save_model(str(booster_dir / f"xgb_{horizon}.ubj"))
+    sat_clf.base.named_steps["model"].get_booster().save_model(str(booster_dir / "saturation_clf.ubj"))
     print(f"\n[Step 8] Serialized joblib wrappers and portable .ubj boosters to artifacts/pipelines/")
 
     # 9. Build Comparison DataFrame

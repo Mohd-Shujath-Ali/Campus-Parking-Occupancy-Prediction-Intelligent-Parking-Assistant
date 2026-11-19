@@ -25,6 +25,18 @@ def load_zones_config(path: str | Path | None = None) -> Dict[str, Any]:
     return _load(str(path or CONFIG_DIR / "zones.yaml"))
 
 
-def xgb_params(section: str) -> Dict[str, Any]:
-    """Copy of a hyperparameter block, e.g. 'xgboost_regressor'."""
-    return dict(load_model_config()["models"][section])
+TUNED_PATH = CONFIG_DIR / "tuned_params.yaml"
+
+
+def xgb_params(section: str, tuned: bool = True) -> Dict[str, Any]:
+    """
+    Hyperparameters for a model block, e.g. 'xgboost_regressor'.
+
+    Defaults come from model_config.yaml. If configs/tuned_params.yaml exists
+    (written by experiments/tune_xgboost.py) its values override the defaults,
+    so the tuned model is what training and serving use.
+    """
+    params = dict(load_model_config()["models"][section])
+    if tuned and TUNED_PATH.exists():
+        params.update(yaml.safe_load(TUNED_PATH.read_text()).get(section, {}))
+    return params

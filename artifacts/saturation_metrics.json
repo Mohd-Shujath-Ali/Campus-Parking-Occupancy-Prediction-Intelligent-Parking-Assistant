@@ -1,0 +1,9 @@
+{
+  "Accuracy": 0.9683,
+  "Precision": 0.8702,
+  "Recall": 0.7499,
+  "F1": 0.8056,
+  "PR_AUC": 0.9041,
+  "threshold": 0.5,
+  "calibrated": true
+}
