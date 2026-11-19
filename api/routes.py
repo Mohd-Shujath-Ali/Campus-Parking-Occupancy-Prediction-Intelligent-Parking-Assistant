@@ -22,6 +22,8 @@ from fastapi import Header
 from recommendation.parking_ranker import ParkingRanker
 from models.inference import predict_zone, predict_all_zones, models_ready, _build_feature_row
 from models.history import HISTORY
+from models import analysis as zone_analytics
+from models.demand import summarise_days
 
 logger = logging.getLogger(__name__)
 _IST = ZoneInfo("Asia/Kolkata")
@@ -187,6 +189,102 @@ def ingest_observation(req: IngestRequest, x_api_key: Optional[str] = Header(Non
 def observation_stats():
     """How much real data has been collected so far."""
     return get_store().stats()
+
+
+# ---------------------------------------------------------------------------
+# Demand forecasting, zone-level analysis, heatmaps
+# ---------------------------------------------------------------------------
+
+_demand_model = None
+
+
+def _get_demand_model():
+    global _demand_model
+    if _demand_model is None:
+        import joblib
+        path = "artifacts/pipelines/demand_forecaster.joblib"
+        if not os.path.exists(path):
+            raise HTTPException(status_code=503, detail="Demand model not trained. Run python -m models.train.")
+        _demand_model = joblib.load(path)
+    return _demand_model
+
+
+def _parse_dates(raw: Optional[str], name: str):
+    out = set()
+    for tok in (raw or "").split(","):
+        tok = tok.strip()
+        if not tok:
+            continue
+        try:
+            out.add(datetime.fromisoformat(tok).date())
+        except ValueError:
+            raise HTTPException(status_code=422, detail=f"{name}: '{tok}' is not an ISO date (YYYY-MM-DD).")
+    return out
+
+
+@router.get("/demand-forecast")
+def demand_forecast(
+    days: int = Query(7, ge=1, le=14, description="Days ahead"),
+    start: Optional[str] = Query(None, description="First day (YYYY-MM-DD, default today IST)"),
+    zone_id: Optional[str] = Query(None),
+    exam_dates: Optional[str] = Query(None, description="Comma-separated dates to treat as exam days (what-if)"),
+    event_dates: Optional[str] = Query(None, description="Comma-separated dates with a campus event (what-if)"),
+):
+    """
+    Calendar-based demand outlook: expected peak time and level, hours above 90% and the
+    24-hour profile for every zone and day. Use exam_dates/event_dates for scenario planning.
+    """
+    if zone_id and zone_id not in ZONES_MAP:
+        raise HTTPException(status_code=404, detail=f"Zone '{zone_id}' not found.")
+    try:
+        first = datetime.fromisoformat(start).date() if start else datetime.now(_IST).date()
+    except ValueError:
+        raise HTTPException(status_code=422, detail="start must be YYYY-MM-DD.")
+    exam, event = _parse_dates(exam_dates, "exam_dates"), _parse_dates(event_dates, "event_dates")
+    grid = _get_demand_model().forecast_grid(first, days, exam_dates=exam, event_dates=event,
+                                             zone_ids=[zone_id] if zone_id else None)
+    rows = summarise_days(grid)
+    for r in rows:
+        r["zone_name"] = ZONES_MAP[r["zone_id"]]["name"]
+    return {"start": first.isoformat(), "days": days, "zone_id": zone_id,
+            "scenario": {"exam_dates": sorted(d.isoformat() for d in exam),
+                         "event_dates": sorted(d.isoformat() for d in event)},
+            "forecast": rows}
+
+
+@router.get("/zone-analysis/{zone_id}")
+def get_zone_analysis(zone_id: str):
+    """Historical behaviour of one zone: profiles, peak, fill/drain times, saturation share."""
+    if zone_id not in ZONES_MAP:
+        raise HTTPException(status_code=404, detail=f"Zone '{zone_id}' not found.")
+    out = zone_analytics.zone_analysis(zone_id)
+    out["zone_name"] = ZONES_MAP[zone_id]["name"]
+    out["category"] = ZONES_MAP[zone_id]["category"]
+    return out
+
+
+@router.get("/heatmap")
+def get_heatmap(
+    kind: str = Query("zone_hour", description="zone_hour | zone_week | forecast"),
+    zone_id: Optional[str] = Query(None),
+    day_type: str = Query("weekday", description="weekday | weekend (zone_hour only)"),
+    date: Optional[str] = Query(None, description="YYYY-MM-DD for kind=forecast (default today)"),
+):
+    """Matrices for heatmaps: historical zone x hour, one zone's weekday x hour, or tomorrow's forecast."""
+    try:
+        if kind == "forecast":
+            day = datetime.fromisoformat(date).date() if date else datetime.now(_IST).date()
+            rows = summarise_days(_get_demand_model().forecast_grid(day, 1))
+            rows.sort(key=lambda r: -r["peak_occupancy"])
+            return {"kind": kind, "date": day.isoformat(), "cols": list(range(24)),
+                    "rows": [ZONES_MAP[r["zone_id"]]["name"] for r in rows],
+                    "row_ids": [r["zone_id"] for r in rows],
+                    "values": [r["hourly"] for r in rows], "data_source": "model_forecast"}
+        return zone_analytics.heatmap(kind, zone_id, day_type)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Zone '{zone_id}' not found.")
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
 
 
 # ---------------------------------------------------------------------------
