@@ -189,3 +189,107 @@ function renderMetricsTable(models) {
 }
 
 document.addEventListener('DOMContentLoaded', loadModelMetrics);
+
+
+/* ---------------------------------------------------------------- Heatmap */
+function heatColor(v) {
+    // 0 -> near white, 0.5 -> orange, 1 -> deep red
+    const stops = [[0, [248, 250, 252]], [0.4, [253, 186, 116]], [0.75, [234, 88, 12]], [1.05, [185, 28, 28]]];
+    const x = Math.min(Math.max(v, 0), 1.05);
+    for (let i = 1; i < stops.length; i++) {
+        if (x <= stops[i][0]) {
+            const [x0, c0] = stops[i - 1], [x1, c1] = stops[i], t = (x - x0) / (x1 - x0);
+            return `rgb(${c0.map((c, k) => Math.round(c + (c1[k] - c) * t)).join(',')})`;
+        }
+    }
+    return 'rgb(185,28,28)';
+}
+
+async function loadHeatmap(kind, day) {
+    const url = kind === 'forecast' ? '/api/heatmap?kind=forecast'
+        : `/api/heatmap?kind=zone_hour&day_type=${day}`;
+    const table = document.getElementById('heatmapTable');
+    try {
+        const res = await fetch(window.apiUrl ? window.apiUrl(url) : url);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const d = await res.json();
+        const head = '<tr><th></th>' + d.cols.map(h => `<th class="text-slate-400 font-normal w-7">${h}</th>`).join('') + '</tr>';
+        const rows = d.rows.map((name, i) =>
+            `<tr><th class="text-right pr-2 text-slate-600 font-semibold whitespace-nowrap">${name}</th>` +
+            d.values[i].map((v, h) => `<td title="${name} · ${String(h).padStart(2, '0')}:00 · ${Math.round(v * 100)}%" ` +
+                `style="background:${heatColor(v)}" class="w-7 h-6 rounded-sm"></td>`).join('') + '</tr>').join('');
+        table.innerHTML = head + rows;
+        const cap = kind === 'forecast' ? `Forecast occupancy for ${d.date} (model)`
+            : `Historical mean occupancy by zone and hour, ${day}s (${d.data_source} data)`;
+        setText('heatmapCaption', cap);
+    } catch (err) {
+        table.innerHTML = `<tr><td class="text-rose-600 text-xs">Heatmap unavailable: ${err.message}</td></tr>`;
+    }
+    document.querySelectorAll('.hm-tab').forEach(b => {
+        const on = b.dataset.kind === kind && (kind === 'forecast' || b.dataset.day === day);
+        b.className = 'hm-tab px-3 py-1.5 rounded-lg text-xs font-bold border ' +
+            (on ? 'bg-orange-600 text-white border-orange-600' : 'bg-white text-slate-600 border-slate-200 hover:border-orange-300');
+    });
+}
+
+/* ------------------------------------------------------------ 7-day outlook */
+function sparkline(vals) {
+    const w = 120, h = 24, pts = vals.map((v, i) =>
+        `${(i / 23 * w).toFixed(1)},${(h - Math.min(v, 1.1) / 1.1 * h).toFixed(1)}`).join(' ');
+    return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" class="inline-block"><polyline fill="none" stroke="#ea580c" stroke-width="1.6" points="${pts}"/></svg>`;
+}
+
+async function loadOutlook() {
+    const zone = document.getElementById('outlookZone').value;
+    const body = document.getElementById('outlookBody');
+    const start = new Date();
+    const iso = d => d.toISOString().slice(0, 10);
+    const exam = [];
+    if (document.getElementById('scenarioExam').checked) {
+        for (let i = 0; i < 7; i++) {
+            const d = new Date(start); d.setDate(d.getDate() + i);
+            if (d.getDay() !== 0 && d.getDay() !== 6) exam.push(iso(d));
+        }
+    }
+    const ev = document.getElementById('scenarioEvent').value;
+    const q = new URLSearchParams({ days: 7, zone_id: zone, start: iso(start) });
+    if (exam.length) q.set('exam_dates', exam.join(','));
+    if (ev) q.set('event_dates', ev);
+    try {
+        const dfUrl = '/api/demand-forecast?' + q;
+        const res = await fetch(window.apiUrl ? window.apiUrl(dfUrl) : dfUrl);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        body.innerHTML = data.forecast.map(r => {
+            const hot = r.peak_occupancy >= 0.9;
+            return `<tr class="hover:bg-slate-50">
+              <td class="px-4 py-3 font-semibold">${r.weekday.slice(0, 3)} ${r.date.slice(5)}</td>
+              <td class="px-4 py-3 font-mono">${r.first_time_above_75 || '—'}</td>
+              <td class="px-4 py-3 font-mono">${r.peak_time}</td>
+              <td class="px-4 py-3 font-bold ${hot ? 'text-rose-600' : 'text-slate-900'}">${Math.round(r.peak_occupancy * 100)}% <span class="text-slate-400 font-normal">(${r.peak_vehicles} cars)</span></td>
+              <td class="px-4 py-3 ${r.hours_above_90 > 0 ? 'text-rose-600 font-bold' : 'text-slate-500'}">${r.hours_above_90}</td>
+              <td class="px-4 py-3">${sparkline(r.hourly)}</td></tr>`;
+        }).join('');
+    } catch (err) {
+        body.innerHTML = `<tr><td colspan="6" class="px-4 py-6 text-center text-rose-600">Outlook unavailable: ${err.message}</td></tr>`;
+    }
+}
+
+async function initDemandViews() {
+    document.querySelectorAll('.hm-tab').forEach(b =>
+        b.addEventListener('click', () => loadHeatmap(b.dataset.kind, b.dataset.day || 'weekday')));
+    loadHeatmap('zone_hour', 'weekday');
+    try {
+        const zones = await (await fetch(window.apiUrl ? window.apiUrl('/api/zones') : '/api/zones')).json();
+        const sel = document.getElementById('outlookZone');
+        sel.innerHTML = zones.map(z => `<option value="${z.zone_id}">${z.name}</option>`).join('');
+        sel.value = zones.find(z => z.zone_id === 'ZONE_MAINPARK_NORTH') ? 'ZONE_MAINPARK_NORTH' : zones[0].zone_id;
+        ['outlookZone', 'scenarioExam', 'scenarioEvent'].forEach(id =>
+            document.getElementById(id).addEventListener('change', loadOutlook));
+        loadOutlook();
+    } catch (err) {
+        document.getElementById('outlookBody').innerHTML =
+            `<tr><td colspan="6" class="px-4 py-6 text-center text-rose-600">Zones unavailable: ${err.message}</td></tr>`;
+    }
+}
+document.addEventListener('DOMContentLoaded', initDemandViews);

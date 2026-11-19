@@ -1,0 +1,23 @@
+,mean_abs_shap_cars
+vehicle_count,34.045
+lag_15m,10.45
+rolling_mean_30m,10.322
+occupancy_ratio,2.525
+hour_cos,2.178
+hour_sin,2.128
+rolling_mean_60m,1.573
+lag_60m,1.44
+operational_capacity,0.876
+delta_30m,0.725
+lag_30m,0.477
+zone identity,0.463
+lag_45m,0.314
+rolling_std_60m,0.284
+delta_15m,0.241
+day_sin,0.231
+rolling_std_30m,0.164
+is_weekend,0.117
+day_cos,0.038
+is_class_transition,0.037
+is_exam_day,0.033
+is_campus_event,0.0

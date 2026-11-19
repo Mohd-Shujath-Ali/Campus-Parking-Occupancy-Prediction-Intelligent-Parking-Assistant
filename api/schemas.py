@@ -15,12 +15,15 @@ class PredictionResponse(BaseModel):
     zone_name: str
     horizon_minutes: int
     predicted_vehicle_count: int
+    predicted_low: Optional[int] = None    # 80% prediction interval
+    predicted_high: Optional[int] = None
     operational_capacity: int
     available_spaces: int
     occupancy_rate: float
     saturation_probability: float
     status: str
     confidence_level: str
+    lag_source: str = "estimated"  # observed | partial | estimated
     stream_frozen: Optional[bool] = Field(False, description="Flag indicating invariant video stream frames")
 
 class RecommendationRequest(BaseModel):
@@ -47,6 +50,15 @@ class RecommendationResponse(BaseModel):
     horizon_minutes: int
     recommended_zones: List[ZoneRankItem]
     counterfactual_tip: Optional[str] = None
+
+
+class IngestRequest(BaseModel):
+    zone_id: str = Field(..., description="Zone the camera belongs to")
+    count: int = Field(..., ge=0, le=2000, description="Deduplicated vehicle count in this camera's ROI")
+    camera_id: Optional[str] = Field(None, description="Defaults to the zone's configured camera")
+    timestamp: Optional[str] = Field(None, description="ISO 8601; defaults to now (IST)")
+    source: str = Field("camera", description="camera | manual | simulator")
+
 
 class NavigateRequest(BaseModel):
     zone_id: str = Field(..., description="Target zone identifier selected by driver")

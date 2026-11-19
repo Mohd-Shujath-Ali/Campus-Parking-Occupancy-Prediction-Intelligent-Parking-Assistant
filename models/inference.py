@@ -9,50 +9,44 @@ import hashlib
 import logging
 import joblib
 import threading
-from collections import deque
 import numpy as np
 import pandas as pd
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 from typing import Dict, Any, Optional
 from pathlib import Path
 
+from features.feature_pipeline import FEATURE_COLS, zone_code
+from models.history import HISTORY, ZoneHistory
+
 logger = logging.getLogger(__name__)
 _IST = ZoneInfo("Asia/Kolkata")
 
-FEATURE_COLS = [
-    'vehicle_count', 'operational_capacity', 'occupancy_ratio',
-    'hour_sin', 'hour_cos', 'day_sin', 'day_cos', 'is_weekend',
-    'is_exam_day', 'is_class_transition',
-    'lag_15m', 'lag_30m', 'lag_45m', 'lag_60m',
-    'delta_15m', 'delta_30m',
-    'rolling_mean_30m', 'rolling_std_30m',
-    'rolling_mean_60m', 'rolling_std_60m'
-]
 
 # ---------------------------------------------------------------------------
 # Model loader (singleton pattern — loaded once at startup)
 # ---------------------------------------------------------------------------
 _xgb_model = None
 _clf_model = None
-_load_error: Optional[str] = None
+_int_model = None
 _model_lock = threading.Lock()
 
 
 def _normalize_timestamp(ts: Optional[datetime]) -> datetime:
-    """Ensures timestamp is consistently offset-aware in Asia/Kolkata timezone."""
+    """Consistently timezone-aware Asia/Kolkata timestamp (naive input is assumed to be IST)."""
     if ts is None:
         return datetime.now(_IST)
     if ts.tzinfo is None:
         return ts.replace(tzinfo=_IST)
     return ts.astimezone(_IST)
+_load_error: Optional[str] = None
 
 
 def _load_models():
-    global _xgb_model, _clf_model, _load_error
+    global _xgb_model, _clf_model, _int_model, _load_error
     if _xgb_model is not None:
         return True
-    with _model_lock:
+    with _model_lock:                      # several request threads may hit a cold start together
         if _xgb_model is not None:
             return True
         try:
@@ -63,6 +57,8 @@ def _load_models():
                 return False
             _xgb_model = joblib.load(xgb_path)
             _clf_model = joblib.load(clf_path)
+            int_path = Path("artifacts/pipelines/xgb_intervals.joblib")
+            _int_model = joblib.load(int_path) if int_path.exists() else None  # optional
             logger.info("XGBoost forecaster and saturation classifier loaded.")
             return True
         except Exception as e:
@@ -74,86 +70,6 @@ def _load_models():
 def models_ready() -> Dict[str, Any]:
     ok = _load_models()
     return {"loaded": ok, "error": _load_error}
-
-
-class _TemporalRingBuffer:
-    """
-    Thread-safe temporal sliding ring buffer storing historical counts at 5-min intervals
-    (retains up to 24 observations = 2 hours) to derive causal lags and velocity deltas
-    during live streaming inference without forcing callers to manage history.
-    """
-    def __init__(self, maxlen: int = 24):
-        self._maxlen = maxlen
-        self._buffers: Dict[str, deque] = {}
-        self._lock = threading.Lock()
-
-    def record_observation(self, zone_id: str, count: int, timestamp: Optional[datetime] = None):
-        ts = _normalize_timestamp(timestamp)
-        with self._lock:
-            if zone_id not in self._buffers:
-                self._buffers[zone_id] = deque(maxlen=self._maxlen)
-            buf = self._buffers[zone_id]
-            # Debounce sub-minute rapid polling: update latest slot if < 45 seconds elapsed
-            if buf:
-                last_time, _ = buf[-1]
-                if abs((ts - last_time).total_seconds()) < 45:
-                    buf[-1] = (ts, int(count))
-                    return
-            buf.append((ts, int(count)))
-
-    def get_lags(self, zone_id: str, current_count: int, timestamp: Optional[datetime] = None) -> Dict[str, int]:
-        ts = _normalize_timestamp(timestamp)
-        with self._lock:
-            buf = self._buffers.get(zone_id)
-            if not buf or len(buf) < 2:
-                # Cold start: Return current count
-                return {
-                    "15m": current_count,
-                    "30m": current_count,
-                    "45m": current_count,
-                    "60m": current_count,
-                }
-
-            history = list(buf)
-
-            def find_lag(offset_minutes: int) -> int:
-                target_time = ts - timedelta(minutes=offset_minutes)
-                best_diff = float("inf")
-                best_val = current_count
-                for t, c in history:
-                    t_norm = _normalize_timestamp(t)
-                    diff = abs((t_norm - target_time).total_seconds())
-                    if diff < best_diff:
-                        best_diff = diff
-                        best_val = c
-                return best_val
-
-            return {
-                "15m": find_lag(15),
-                "30m": find_lag(30),
-                "45m": find_lag(45),
-                "60m": find_lag(60),
-            }
-
-    def is_stream_frozen(self, zone_id: str) -> bool:
-        """
-        Detects camera/video ingest freeze (e.g. frozen CCTV stream):
-        returns True if the last 6 consecutive readings are identical, non-empty,
-        and span at least 10 minutes (eliminates rapid-poll false positives).
-        """
-        with self._lock:
-            buf = self._buffers.get(zone_id)
-            if not buf or len(buf) < 6:
-                return False
-            last_6 = list(buf)[-6:]
-            time_span = abs((last_6[-1][0] - last_6[0][0]).total_seconds())
-            if time_span < 600:
-                # Need at least 10 minutes of unchanging data
-                return False
-            last_counts = [c for _, c in last_6]
-            return len(set(last_counts)) == 1
-
-_ring_buffer = _TemporalRingBuffer()
 
 
 # ---------------------------------------------------------------------------
@@ -168,68 +84,77 @@ def _build_feature_row(
     is_class_transition: bool,
     timestamp: Optional[datetime] = None,
     lag_counts: Optional[Dict[str, int]] = None,  # {'15m':x, '30m':x, '45m':x, '60m':x}
-) -> pd.DataFrame:
+    history: Optional[ZoneHistory] = None,
+    is_campus_event: bool = False,
+):
     """
-    Constructs the 20-feature vector expected by the trained XGBoost model.
-    When historical lag counts are not supplied, queries the Temporal Ring Buffer.
+    Build the feature vector in the exact schema used for training
+    (features.feature_pipeline.FEATURE_COLS).
+
+    Lag sources, in priority order: explicit ``lag_counts`` > rolling
+    ``history`` buffer > current count (flagged as "estimated").
+    Returns (DataFrame, lag_source) where lag_source is "observed",
+    "partial" or "estimated".
     """
     if timestamp is None:
         timestamp = datetime.now(_IST)
 
-    if lag_counts is None:
-        lag_counts = _ring_buffer.get_lags(zone_id, current_count, timestamp)
-
     hour_frac = timestamp.hour + timestamp.minute / 60.0
     dow = timestamp.weekday()  # 0=Mon ... 6=Sun
+    occ_ratio = current_count / operational_capacity if operational_capacity > 0 else 0.0
 
-    hour_sin = np.sin(2 * np.pi * hour_frac / 24.0)
-    hour_cos = np.cos(2 * np.pi * hour_frac / 24.0)
-    day_sin  = np.sin(2 * np.pi * dow / 7.0)
-    day_cos  = np.cos(2 * np.pi * dow / 7.0)
-    is_weekend = int(dow >= 5)
-    occ_ratio  = current_count / operational_capacity if operational_capacity > 0 else 0.0
+    lags: Dict[int, Optional[int]] = {}
+    for m in (15, 30, 45, 60):
+        v = None
+        if lag_counts and f"{m}m" in lag_counts:
+            v = lag_counts[f"{m}m"]
+        elif lag_counts and f"lag_{m}m" in lag_counts:
+            v = lag_counts[f"lag_{m}m"]
+        elif history is not None:
+            v = history.lag(zone_id, timestamp, m)
+        lags[m] = v
+    found = sum(v is not None for v in lags.values())
+    lag_source = "observed" if found == 4 else "partial" if found else "estimated"
+    lag_val = {m: (v if v is not None else current_count) for m, v in lags.items()}
 
-    # Lag counts — support both '15m' and 'lag_15m' keys
-    lag_15 = lag_counts.get("15m", lag_counts.get("lag_15m", current_count))
-    lag_30 = lag_counts.get("30m", lag_counts.get("lag_30m", current_count))
-    lag_45 = lag_counts.get("45m", lag_counts.get("lag_45m", current_count))
-    lag_60 = lag_counts.get("60m", lag_counts.get("lag_60m", current_count))
+    # Rolling stats: training uses the 5-minute samples t-5..t-W (current step
+    # excluded, pandas sample std). Use the same window when history exists.
+    def _roll(w: int):
+        vals = history.window(zone_id, timestamp, w) if history is not None else []
+        if not vals:  # fall back to whatever lags we have
+            vals = [lag_val[m] for m in (15, 30, 45, 60) if m <= w] or [current_count]
+        arr = np.asarray(vals, dtype=float)
+        std = float(arr.std(ddof=1)) if len(arr) > 1 else 0.0
+        return float(arr.mean()), std
 
-    delta_15 = current_count - lag_15
-    delta_30 = current_count - lag_30
-
-    # Rolling stats from lag history (mean & std over last 30/60m)
-    lag_values_30 = [current_count, lag_15, lag_30]
-    lag_values_60 = [current_count, lag_15, lag_30, lag_45, lag_60]
-    rolling_mean_30 = float(np.mean(lag_values_30))
-    rolling_std_30  = float(np.std(lag_values_30, ddof=0))
-    rolling_mean_60 = float(np.mean(lag_values_60))
-    rolling_std_60  = float(np.std(lag_values_60, ddof=0))
+    rm30, rs30 = _roll(30)
+    rm60, rs60 = _roll(60)
 
     row = {
-        'vehicle_count':      current_count,
+        'vehicle_count':        current_count,
         'operational_capacity': operational_capacity,
-        'occupancy_ratio':    occ_ratio,
-        'hour_sin':           hour_sin,
-        'hour_cos':           hour_cos,
-        'day_sin':            day_sin,
-        'day_cos':            day_cos,
-        'is_weekend':         is_weekend,
-        'is_exam_day':        int(is_exam_day),
-        'is_class_transition': int(is_class_transition),
-        'lag_15m':            lag_15,
-        'lag_30m':            lag_30,
-        'lag_45m':            lag_45,
-        'lag_60m':            lag_60,
-        'delta_15m':          delta_15,
-        'delta_30m':          delta_30,
-        'rolling_mean_30m':   rolling_mean_30,
-        'rolling_std_30m':    rolling_std_30,
-        'rolling_mean_60m':   rolling_mean_60,
-        'rolling_std_60m':    rolling_std_60,
+        'occupancy_ratio':      occ_ratio,
+        'zone_code':            zone_code(zone_id),
+        'hour_sin':             np.sin(2 * np.pi * hour_frac / 24.0),
+        'hour_cos':             np.cos(2 * np.pi * hour_frac / 24.0),
+        'day_sin':              np.sin(2 * np.pi * dow / 7.0),
+        'day_cos':              np.cos(2 * np.pi * dow / 7.0),
+        'is_weekend':           int(dow >= 5),
+        'is_exam_day':          int(is_exam_day),
+        'is_campus_event':      int(is_campus_event),
+        'is_class_transition':  int(is_class_transition),
+        'lag_15m':              lag_val[15],
+        'lag_30m':              lag_val[30],
+        'lag_45m':              lag_val[45],
+        'lag_60m':              lag_val[60],
+        'delta_15m':            current_count - lag_val[15],
+        'delta_30m':            current_count - lag_val[30],
+        'rolling_mean_30m':     rm30,
+        'rolling_std_30m':      rs30,
+        'rolling_mean_60m':     rm60,
+        'rolling_std_60m':      rs60,
     }
-
-    return pd.DataFrame([row], columns=FEATURE_COLS)
+    return pd.DataFrame([row], columns=FEATURE_COLS), lag_source
 
 
 # ---------------------------------------------------------------------------
@@ -245,6 +170,9 @@ def predict_zone(
     is_class_transition: bool = False,
     timestamp: Optional[datetime] = None,
     lag_counts: Optional[Dict[str, int]] = None,
+    is_campus_event: bool = False,
+    history: Optional[ZoneHistory] = HISTORY,
+    record: bool = True,
 ) -> Dict[str, Any]:
     """
     Runs the real XGBoost multi-horizon forecaster on the given zone state.
@@ -252,6 +180,9 @@ def predict_zone(
     Falls back to heuristic if model is unavailable.
     """
     _load_models()
+    timestamp = _normalize_timestamp(timestamp)
+    lag_source = "estimated"
+    low = high = None
 
     horizon_key_map = {15: "H15", 30: "H30", 60: "H60"}
     h_key = horizon_key_map.get(horizon_minutes, "H15")
@@ -261,18 +192,30 @@ def predict_zone(
         surge = 1.15 if is_class_transition else 1.02
         exam  = 1.10 if is_exam_day else 1.0
         pred_count = int(min(operational_capacity * 1.15, max(0, current_count * surge * exam)))
+        low = high = None
         sat_proba  = 0.5
         source     = "heuristic_fallback"
     else:
-        X = _build_feature_row(
+        X, lag_source = _build_feature_row(
             zone_id, current_count, operational_capacity,
-            is_exam_day, is_class_transition, timestamp, lag_counts
+            is_exam_day, is_class_transition, timestamp, lag_counts,
+            history=history, is_campus_event=is_campus_event,
         )
         preds = _xgb_model.predict(X)
-        max_bound = max(current_count, int(operational_capacity * 1.30))
+        max_bound = max(current_count, int(operational_capacity * 1.30))   # allow overflow demand
         pred_count = int(max(0, min(max_bound, round(preds[h_key][0]))))
         sat_proba  = float(_clf_model.predict_proba(X)[0])
         source     = "xgboost_model"
+        if _int_model is not None:
+            lo, hi = _int_model.predict(X, h_key, point=np.array([pred_count], dtype=float))
+            low = int(max(0, np.floor(lo[0])))
+            high = int(min(max_bound, np.ceil(hi[0])))
+
+    # Remember this observation so later calls get real lags
+    is_frozen = False
+    if record and history is not None:
+        history.record(zone_id, timestamp, current_count)
+        is_frozen = history.is_frozen(zone_id)
 
     avail      = max(0, operational_capacity - pred_count)
     # Cap occ_rate at 1.0 — a zone cannot exceed 100% by definition
@@ -280,18 +223,21 @@ def predict_zone(
     status     = ("SATURATED" if occ_rate >= 0.90 else
                   "FILLING_FAST" if occ_rate >= 0.75 else "AVAILABLE")
 
-    # Record observation in temporal ring buffer
-    _ring_buffer.record_observation(zone_id, current_count, timestamp)
-    is_frozen = _ring_buffer.is_stream_frozen(zone_id)
-
     return {
         "predicted_vehicle_count": pred_count,
+        # 80% conformal prediction interval (None when the heuristic fallback is used)
+        "predicted_low":           low,
+        "predicted_high":          high,
         "operational_capacity":    operational_capacity,
         "available_spaces":        avail,
         "occupancy_rate":          occ_rate,
         "saturation_probability":  round(sat_proba, 4),
         "status":                  status,
         "inference_source":        source,
+        # "observed": all lags from real history; "partial"/"estimated": some
+        # or all lags were filled with the current count (lower reliability)
+        "lag_source":              lag_source,
+        # True when the last 6 readings (>= 10 min) were identical: likely a frozen camera feed
         "stream_frozen":           is_frozen,
     }
 
@@ -332,10 +278,13 @@ def predict_all_zones(
             is_exam_day=is_exam_day,
             is_class_transition=is_class_transition,
             timestamp=timestamp,
+            history=None,    # simulated counts must not mix with real history
+            record=False,
         )
         pred["current_count"] = sim_count
         pred["camera_age_seconds"] = float(zone_seed % 60)  # simulated age 0-60s
         pred["camera_status"] = "live"
+        pred["count_source"] = "simulated"  # demo mode: not a real detection
         results[z_id] = pred
 
     return results

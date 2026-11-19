@@ -47,8 +47,23 @@ def run_shap_analysis(
         X_sample = X_test.reset_index(drop=True)
 
     print(f"[SHAP] Computing TreeSHAP values over {len(X_sample)} sample test records...")
-    explainer = shap.TreeExplainer(h15_estimator)
-    shap_vals_raw = explainer.shap_values(X_sample)
+    # The deployed model is an sklearn Pipeline (preprocessing + XGBoost). Explain the XGBoost step on the
+    # transformed matrix, then merge the 12 zone one-hot columns back into a single "zone_code" feature so the
+    # plots stay in terms of the original model inputs.
+    from models.pipeline import transformed_feature_names
+    if hasattr(h15_estimator, "named_steps"):
+        prep, booster_model = h15_estimator.named_steps["prep"], h15_estimator.named_steps["model"]
+        names = transformed_feature_names(h15_estimator)
+        explainer = shap.TreeExplainer(booster_model)
+        sv = explainer.shap_values(prep.transform(X_sample))
+        zone_cols = [i for i, n in enumerate(names) if n.startswith("zone=")]
+        keep = [i for i in range(len(names)) if i not in zone_cols]
+        raw_names = [names[i] for i in keep] + ["zone_code"]
+        shap_vals_raw = np.column_stack([sv[:, keep], sv[:, zone_cols].sum(axis=1)])
+        X_sample = X_sample[raw_names]       # same column order as shap_vals_raw
+    else:                                    # plain (non-pipeline) estimator
+        explainer = shap.TreeExplainer(h15_estimator)
+        shap_vals_raw = explainer.shap_values(X_sample)
 
     # 1. Global Beeswarm Summary
     plt.figure(figsize=(10, 7), dpi=150)

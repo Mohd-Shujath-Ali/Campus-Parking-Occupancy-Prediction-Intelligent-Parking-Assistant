@@ -93,6 +93,7 @@ async function loadZonesDirectory() {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const zones = await res.json();
         renderZones(zones);
+        loadAnalysis(zones);
     } catch (err) {
         const grid = document.getElementById('zonesGrid');
         if (grid) {
@@ -119,7 +120,7 @@ function renderZones(zones) {
         const buffer = z.theoretical_capacity - z.operational_capacity;
 
         return `
-        <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 hover:border-orange-300 transition-all space-y-4">
+        <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 hover:border-orange-300 transition-all space-y-4" data-zone="${z.zone_id}">
             <div class="flex justify-between items-start">
                 <div>
                     <span class="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-orange-100 text-orange-800">${z.category}</span>
@@ -140,6 +141,8 @@ function renderZones(zones) {
                 </div>
             </div>
 
+            <div data-analysis class="text-xs text-slate-400">Loading usage profile…</div>
+
             <div>
                 <span class="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-1.5">Adjacent Landmarks &amp; Hubs</span>
                 <div class="flex flex-wrap gap-1.5">
@@ -148,6 +151,40 @@ function renderZones(zones) {
             </div>
         </div>`;
     }).join('');
+}
+
+const hh = h => `${String(h).padStart(2, '0')}:00`;
+
+function profileSvg(wd, we) {
+    const w = 260, h = 46, pts = v => v.map((x, i) =>
+        `${(i / 23 * w).toFixed(1)},${(h - Math.min(x, 1.1) / 1.1 * h).toFixed(1)}`).join(' ');
+    return `<svg viewBox="0 0 ${w} ${h}" style="width:100%;height:48px"><polyline fill="none" stroke="#cbd5e1" stroke-width="1.6" points="${pts(we)}"/>` +
+           `<polyline fill="none" stroke="#ea580c" stroke-width="2" points="${pts(wd)}"/></svg>`;
+}
+
+async function loadAnalysis(zones) {
+    await Promise.all(zones.map(async z => {
+        const box = document.querySelector(`[data-zone="${z.zone_id}"] [data-analysis]`);
+        if (!box) return;
+        try {
+            const apiPath = `/api/zone-analysis/${z.zone_id}`;
+            const res = await fetch(window.apiUrl ? window.apiUrl(apiPath) : apiPath);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const a = await res.json();
+            box.className = 'text-xs space-y-1.5';
+            box.innerHTML = `
+              <span class="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">Typical usage <span class="normal-case font-normal text-slate-400">(${a.data_source} history)</span></span>
+              ${profileSvg(a.weekday_profile, a.weekend_profile)}
+              <div class="flex justify-between text-[10px] text-slate-400"><span>00h</span><span><span class="text-orange-600 font-bold">━</span> weekday  <span class="text-slate-400 font-bold">━</span> weekend</span><span>23h</span></div>
+              <div class="grid grid-cols-3 gap-2 text-center pt-1">
+                <div class="bg-slate-50 rounded-lg p-1.5 border border-slate-100"><div class="text-[10px] text-slate-400 uppercase font-bold">Peak</div><div class="font-black text-slate-900">${hh(a.weekday_peak_hour)}</div><div class="text-[10px] text-slate-500">${Math.round(a.weekday_peak_occupancy * 100)}% full</div></div>
+                <div class="bg-slate-50 rounded-lg p-1.5 border border-slate-100"><div class="text-[10px] text-slate-400 uppercase font-bold">Saturated</div><div class="font-black text-slate-900">${Math.round(a.share_time_saturated * 100)}%</div><div class="text-[10px] text-slate-500">of the time</div></div>
+                <div class="bg-slate-50 rounded-lg p-1.5 border border-slate-100"><div class="text-[10px] text-slate-400 uppercase font-bold">Weekend</div><div class="font-black text-slate-900">${a.weekend_to_weekday_ratio}×</div><div class="text-[10px] text-slate-500">vs weekday</div></div>
+              </div>`;
+        } catch (err) {
+            box.textContent = `Usage profile unavailable (${err.message})`;
+        }
+    }));
 }
 
 document.addEventListener('DOMContentLoaded', loadZonesData);

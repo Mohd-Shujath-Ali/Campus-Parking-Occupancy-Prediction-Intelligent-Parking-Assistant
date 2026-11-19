@@ -206,6 +206,28 @@ def test_favicon_served():
                                            "image/ico", "application/octet-stream")
 
 
+def test_explain_endpoint_is_additive():
+    r = client.get("/api/explain", params={"zone_id": "ZONE_BLOCK1", "current_count": 80,
+                                           "horizon_minutes": 15})
+    assert r.status_code == 200
+    d = r.json()
+    total = d["base_value"] + sum(c["effect_cars"] for c in d["top_contributions"]) + d["other_effect_cars"]
+    assert abs(total - d["prediction"]) < 0.5      # SHAP is additive (rounding only)
+    assert d["top_contributions"][0]["feature"]
+
+
+def test_explain_unknown_zone_404():
+    assert client.get("/api/explain", params={"zone_id": "NOPE", "current_count": 1}).status_code == 404
+
+
+def test_predict_returns_interval_containing_point_forecast():
+    r = client.post("/api/predict", json={"zone_id": "ZONE_BLOCK1", "current_count": 90,
+                                          "horizon_minutes": 30})
+    d = r.json()
+    assert d["predicted_low"] is not None
+    assert d["predicted_low"] <= d["predicted_vehicle_count"] <= d["predicted_high"]
+
+
 # ─────────────────────────── Anti-Herding & Navigation ────────
 
 def test_navigate_endpoint():

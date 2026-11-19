@@ -1,0 +1,21 @@
+timestamp,zone_id,current,actual,pred,err,transition,jump,cap,likely_reason
+2026-10-19 08:40:00,ZONE_MAINPARK_SOUTH,279,345.0,311.56,-33.44,0,66.0,300,large 15-min swing not visible in lags; near full
+2026-10-19 17:05:00,ZONE_MAINPARK_NORTH,75,41.0,74.4,33.4,1,34.0,320,class-bell window; large 15-min swing not visible in lags
+2026-10-24 07:25:00,ZONE_MAINPARK_NORTH,22,66.0,35.64,-30.36,0,44.0,320,large 15-min swing not visible in lags
+2026-10-21 09:20:00,ZONE_MAINPARK_SOUTH,287,248.0,277.57,29.57,0,39.0,300,large 15-min swing not visible in lags
+2026-10-19 07:05:00,ZONE_MAINPARK_SOUTH,106,176.0,146.86,-29.14,0,70.0,300,large 15-min swing not visible in lags
+2026-10-25 06:40:00,ZONE_MAINPARK_SOUTH,16,0.0,27.53,27.53,0,16.0,300,noise spike
+2026-10-21 12:10:00,ZONE_MAINPARK_SOUTH,216,259.0,231.84,-27.16,0,43.0,300,large 15-min swing not visible in lags
+2026-10-25 07:15:00,ZONE_MAINPARK_NORTH,32,60.0,33.19,-26.81,0,28.0,320,noise spike
+2026-10-23 15:10:00,ZONE_MAINPARK_SOUTH,239,201.0,227.8,26.8,0,38.0,300,large 15-min swing not visible in lags
+2026-10-26 04:20:00,ZONE_MAINPARK_SOUTH,0,35.0,8.31,-26.69,0,35.0,300,large 15-min swing not visible in lags
+2026-10-20 07:05:00,ZONE_MAINPARK_SOUTH,109,167.0,141.37,-25.63,0,58.0,300,large 15-min swing not visible in lags
+2026-10-26 16:40:00,ZONE_MAINPARK_SOUTH,135,47.0,72.52,25.52,0,88.0,300,large 15-min swing not visible in lags
+2026-10-21 16:45:00,ZONE_MAINPARK_SOUTH,78,80.0,54.87,-25.13,1,2.0,300,class-bell window
+2026-10-23 12:55:00,ZONE_MAINPARK_SOUTH,222,204.0,229.12,25.12,1,18.0,300,class-bell window
+2026-10-19 07:30:00,ZONE_MAINPARK_NORTH,216,230.0,254.86,24.86,0,14.0,320,noise spike
+2026-10-23 08:10:00,ZONE_MAINPARK_NORTH,304,280.0,304.34,24.34,0,24.0,320,noise spike
+2026-10-19 04:15:00,ZONE_MAINPARK_NORTH,2,32.0,8.14,-23.86,0,30.0,320,noise spike
+2026-10-19 11:50:00,ZONE_MAINPARK_SOUTH,235,199.0,222.83,23.83,0,36.0,300,large 15-min swing not visible in lags
+2026-10-20 10:10:00,ZONE_MAINPARK_SOUTH,273,244.0,267.8,23.8,0,29.0,300,noise spike
+2026-10-20 14:25:00,ZONE_MAINPARK_SOUTH,260,272.0,248.2,-23.8,0,12.0,300,near full

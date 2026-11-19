@@ -1,10 +1,10 @@
 Model,Horizon,Split,MAE,RMSE,R2,Inflection_MAE,PR_AUC,Recall,Accuracy
-Persistence Baseline,+15 min,Holdout Test,6.064,9.209,0.9805,15.571,,,
-Seasonal Mean Baseline,+15 min,Holdout Test,40.399,53.852,0.3339,,,,
-Ridge Regression,+15 min,Holdout Test,5.607,8.35,0.984,15.846,,,
-Random Forest,+15 min,Holdout Test,4.069,5.539,0.993,7.296,,,
-Tuned XGBoost,+15 min,Validation,4.634,6.354,0.9906,,,,
-Tuned XGBoost,+15 min,Holdout Test,4.66,6.442,0.9905,9.839,,,
-Tuned XGBoost,+30 min,Holdout Test,5.36,7.451,0.9872,,,,
-Tuned XGBoost,+60 min,Holdout Test,6.743,9.739,0.9782,,,,
-Saturation Classifier,+15 min,Holdout Test,,,,,0.9498,0.9866,0.9525
+Persistence Baseline,+15 min,Holdout Test,6.631,10.116,0.9794,15.329,,,
+Seasonal Mean Baseline,+15 min,Holdout Test,6.354,9.925,0.9802,,,,
+Ridge Regression,+15 min,Holdout Test,6.129,9.157,0.9831,15.29,,,
+Random Forest,+15 min,Holdout Test,4.163,5.673,0.9935,7.368,,,
+Tuned XGBoost,+15 min,Validation,4.049,6.279,0.9918,,,,
+Tuned XGBoost,+15 min,Holdout Test,3.677,4.945,0.9951,5.027,,,
+Tuned XGBoost,+30 min,Holdout Test,3.717,4.99,0.995,,,,
+Tuned XGBoost,+60 min,Holdout Test,3.783,5.093,0.9948,,,,
+Saturation Classifier,+15 min,Holdout Test,,,,,0.9041,0.7499,0.9683

@@ -4,6 +4,9 @@ import threading
 import numpy as np
 from typing import List, Dict, Any, Optional
 
+from utils.config import load_model_config
+
+
 class InFlightDispatchTracker:
     """
     Tracks active in-flight driver dispatches towards parking zones with a 15-minute TTL.
@@ -43,16 +46,14 @@ class ParkingRanker:
     Multi-criteria parking recommendation engine with Anti-Herding Stochastic Traffic Dispersion.
     Balances predicted availability, walking distance, camera freshness, and saturation risk.
     """
-    def __init__(self, config_path: str = "configs/zones.yaml"):
+    def __init__(self, config_path: str = "configs/zones.yaml", seed: Optional[int] = None):
+        self.rng = np.random.default_rng(seed)
         with open(config_path, "r") as f:
             cfg = yaml.safe_load(f)
         self.zones = {z["id"]: z for z in cfg["zones"]}
-        self.weights = cfg.get("recommendation_weights", {
-            "availability_weight": 0.50,
-            "distance_weight": 0.35,
-            "freshness_penalty_weight": 0.15,
-            "saturation_threshold": 0.90
-        })
+        # model_config.yaml is the single source of truth for ranking parameters
+        self.weights = load_model_config()["recommendation"]
+        # in-flight driver dispatches (POST /api/navigate) reduce a lot's effective availability
         self.dispatch_tracker = InFlightDispatchTracker(ttl_seconds=900)
 
     def rank_zones(
@@ -86,8 +87,10 @@ class ParkingRanker:
             # Multi-criteria scoring
             avail_score = max(0.0, 1.0 - occ_rate)
             dist_score = max(0.0, 1.0 - (dist / max_dist))
-            freshness_penalty = 0.3 if cam_age > 300.0 else 0.0
-            saturation_risk_penalty = 0.5 if sat_prob > 0.70 else 0.0
+            freshness_penalty = 0.3 if cam_age > self.weights["camera_stale_seconds"] else 0.0
+            saturation_risk_penalty = (
+                0.5 if sat_prob > self.weights["saturation_hard_exclude_threshold"] else 0.0
+            )
 
             total_score = (
                 self.weights["availability_weight"] * avail_score +
@@ -119,13 +122,20 @@ class ParkingRanker:
         # Sort descending by utility score
         scored_zones.sort(key=lambda x: x["score"], reverse=True)
 
-        # Anti-Herding Traffic Dispersion: If top 2 zones have very close score (< 0.08 delta),
-        # assign top rank probabilistically proportional to remaining available spaces
+        # Anti-Herding Traffic Dispersion: zones whose score is within `delta` of
+        # the best are near-ties. Instead of sending every driver to the same
+        # lot, pick the lead zone among them with softmax(score / beta)
+        # probabilities, so demand spreads across near-equivalent lots.
         if apply_anti_herding and len(scored_zones) >= 2:
-            top1 = scored_zones[0]
-            top2 = scored_zones[1]
-            if (top1["score"] - top2["score"]) < 0.08 and top2["available_spaces"] > top1["available_spaces"]:
-                # Swap to disperse traffic and avoid congestion shockwaves
-                scored_zones[0], scored_zones[1] = top2, top1
+            delta = self.weights["anti_herding_score_delta_threshold"]
+            beta = self.weights["anti_herding_beta"]
+            top = scored_zones[0]["score"]
+            k = sum(1 for z in scored_zones if top - z["score"] <= delta)
+            if k >= 2:
+                scores = np.array([z["score"] for z in scored_zones[:k]])
+                logits = (scores - scores.max()) / beta
+                probs = np.exp(logits) / np.exp(logits).sum()
+                lead = int(self.rng.choice(k, p=probs))
+                scored_zones.insert(0, scored_zones.pop(lead))
 
         return scored_zones
