@@ -8,6 +8,7 @@ import os
 import hashlib
 import logging
 import joblib
+import threading
 import numpy as np
 import pandas as pd
 from datetime import datetime, timezone
@@ -28,6 +29,16 @@ _IST = ZoneInfo("Asia/Kolkata")
 _xgb_model = None
 _clf_model = None
 _int_model = None
+_model_lock = threading.Lock()
+
+
+def _normalize_timestamp(ts: Optional[datetime]) -> datetime:
+    """Consistently timezone-aware Asia/Kolkata timestamp (naive input is assumed to be IST)."""
+    if ts is None:
+        return datetime.now(_IST)
+    if ts.tzinfo is None:
+        return ts.replace(tzinfo=_IST)
+    return ts.astimezone(_IST)
 _load_error: Optional[str] = None
 
 
@@ -35,22 +46,25 @@ def _load_models():
     global _xgb_model, _clf_model, _int_model, _load_error
     if _xgb_model is not None:
         return True
-    try:
-        xgb_path = Path("artifacts/pipelines/xgb_multi_horizon.joblib")
-        clf_path = Path("artifacts/pipelines/saturation_classifier.joblib")
-        if not xgb_path.exists() or not clf_path.exists():
-            _load_error = f"Model artifacts not found at {xgb_path} or {clf_path}"
+    with _model_lock:                      # several request threads may hit a cold start together
+        if _xgb_model is not None:
+            return True
+        try:
+            xgb_path = Path("artifacts/pipelines/xgb_multi_horizon.joblib")
+            clf_path = Path("artifacts/pipelines/saturation_classifier.joblib")
+            if not xgb_path.exists() or not clf_path.exists():
+                _load_error = f"Model artifacts not found at {xgb_path} or {clf_path}"
+                return False
+            _xgb_model = joblib.load(xgb_path)
+            _clf_model = joblib.load(clf_path)
+            int_path = Path("artifacts/pipelines/xgb_intervals.joblib")
+            _int_model = joblib.load(int_path) if int_path.exists() else None  # optional
+            logger.info("XGBoost forecaster and saturation classifier loaded.")
+            return True
+        except Exception as e:
+            _load_error = str(e)
+            logger.error(f"Failed to load ML models: {e}")
             return False
-        _xgb_model = joblib.load(xgb_path)
-        _clf_model = joblib.load(clf_path)
-        int_path = Path("artifacts/pipelines/xgb_intervals.joblib")
-        _int_model = joblib.load(int_path) if int_path.exists() else None  # optional
-        logger.info("XGBoost forecaster and saturation classifier loaded.")
-        return True
-    except Exception as e:
-        _load_error = str(e)
-        logger.error(f"Failed to load ML models: {e}")
-        return False
 
 
 def models_ready() -> Dict[str, Any]:
@@ -94,6 +108,8 @@ def _build_feature_row(
         v = None
         if lag_counts and f"{m}m" in lag_counts:
             v = lag_counts[f"{m}m"]
+        elif lag_counts and f"lag_{m}m" in lag_counts:
+            v = lag_counts[f"lag_{m}m"]
         elif history is not None:
             v = history.lag(zone_id, timestamp, m)
         lags[m] = v
@@ -164,8 +180,7 @@ def predict_zone(
     Falls back to heuristic if model is unavailable.
     """
     _load_models()
-    if timestamp is None:
-        timestamp = datetime.now(_IST)
+    timestamp = _normalize_timestamp(timestamp)
     lag_source = "estimated"
     low = high = None
 
@@ -187,17 +202,20 @@ def predict_zone(
             history=history, is_campus_event=is_campus_event,
         )
         preds = _xgb_model.predict(X)
-        pred_count = int(max(0, min(operational_capacity * 1.20, round(preds[h_key][0]))))
+        max_bound = max(current_count, int(operational_capacity * 1.30))   # allow overflow demand
+        pred_count = int(max(0, min(max_bound, round(preds[h_key][0]))))
         sat_proba  = float(_clf_model.predict_proba(X)[0])
         source     = "xgboost_model"
         if _int_model is not None:
             lo, hi = _int_model.predict(X, h_key, point=np.array([pred_count], dtype=float))
             low = int(max(0, np.floor(lo[0])))
-            high = int(min(operational_capacity * 1.20, np.ceil(hi[0])))
+            high = int(min(max_bound, np.ceil(hi[0])))
 
     # Remember this observation so later calls get real lags
+    is_frozen = False
     if record and history is not None:
         history.record(zone_id, timestamp, current_count)
+        is_frozen = history.is_frozen(zone_id)
 
     avail      = max(0, operational_capacity - pred_count)
     # Cap occ_rate at 1.0 — a zone cannot exceed 100% by definition
@@ -219,6 +237,8 @@ def predict_zone(
         # "observed": all lags from real history; "partial"/"estimated": some
         # or all lags were filled with the current count (lower reliability)
         "lag_source":              lag_source,
+        # True when the last 6 readings (>= 10 min) were identical: likely a frozen camera feed
+        "stream_frozen":           is_frozen,
     }
 
 

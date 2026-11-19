@@ -8,6 +8,7 @@ class PredictionRequest(BaseModel):
     is_exam_day: bool = Field(False, description="Flag indicating whether exam session regime is active")
     is_class_transition: bool = Field(False, description="Flag indicating rush surge window around lecture bells")
     timestamp: Optional[str] = Field(None, description="ISO timestamp (defaults to current time)")
+    lag_counts: Optional[Dict[str, int]] = Field(None, description="Optional historical counts e.g. {'15m': 120, '30m': 110}")
 
 class PredictionResponse(BaseModel):
     zone_id: str
@@ -23,6 +24,7 @@ class PredictionResponse(BaseModel):
     status: str
     confidence_level: str
     lag_source: str = "estimated"  # observed | partial | estimated
+    stream_frozen: Optional[bool] = Field(False, description="Flag indicating invariant video stream frames")
 
 class RecommendationRequest(BaseModel):
     destination: str = Field(..., description="Campus destination block (e.g. 'Block_26_CSE', 'Block_1', 'Food_Square')")
@@ -56,3 +58,7 @@ class IngestRequest(BaseModel):
     camera_id: Optional[str] = Field(None, description="Defaults to the zone's configured camera")
     timestamp: Optional[str] = Field(None, description="ISO 8601; defaults to now (IST)")
     source: str = Field("camera", description="camera | manual | simulator")
+
+
+class NavigateRequest(BaseModel):
+    zone_id: str = Field(..., description="Target zone identifier selected by driver")

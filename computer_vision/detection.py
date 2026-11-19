@@ -186,6 +186,41 @@ def _draw_model_detections(
     return annotated
 
 
+def assess_image_quality(image_bgr: np.ndarray) -> Dict[str, Any]:
+    """
+    Evaluates image quality metrics to diagnose camera degradation before inference:
+    detects extreme underexposure (night/lighting failure), glare/overexposure, blur,
+    and low contrast (fog/smudged lens).
+    """
+    if image_bgr is None or image_bgr.size == 0:
+        return {"is_degraded": True, "reasons": ["Empty or invalid image frame"]}
+
+    gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY) if len(image_bgr.shape) == 3 else image_bgr
+    mean_val = float(np.mean(gray))
+    std_val = float(np.std(gray))
+    laplacian_var = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+
+    reasons = []
+    if mean_val < 35.0:
+        reasons.append("Severe underexposure / night scene without IR illumination")
+    elif mean_val > 225.0:
+        reasons.append("Severe glare / sensor overexposure")
+
+    if laplacian_var < 50.0:
+        reasons.append(f"Significant image blur / defocus (Laplacian variance = {laplacian_var:.1f})")
+
+    if std_val < 18.0:
+        reasons.append(f"Low contrast / dense fog / obstructed lens (std = {std_val:.1f})")
+
+    return {
+        "is_degraded": len(reasons) > 0,
+        "reasons": reasons,
+        "mean_brightness": round(mean_val, 1),
+        "contrast_std": round(std_val, 1),
+        "blur_laplacian_var": round(laplacian_var, 1),
+    }
+
+
 def _run_single_model(
     model,
     img: np.ndarray,
@@ -196,6 +231,7 @@ def _run_single_model(
     """
     Executes inference for a single model and filters via ROI.
     """
+    quality = assess_image_quality(img)
     if model is None:
         return {
             "model_name": model_name,
@@ -206,6 +242,7 @@ def _run_single_model(
             "inference_time_ms": 0.0,
             "detections": [],
             "annotated_image_base64": "",
+            "image_quality": quality,
             "error": _load_errors.get(model_name.lower(), "Model not loaded")
         }
 
@@ -274,6 +311,7 @@ def _run_single_model(
         "detections_roi": roi_dets,
         "detections_outside": out_dets,
         "annotated_image_base64": b64_img,
+        "image_quality": quality,
         "error": None
     }
 

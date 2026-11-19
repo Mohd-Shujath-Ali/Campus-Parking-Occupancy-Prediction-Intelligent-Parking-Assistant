@@ -1,11 +1,12 @@
 # Campus Parking Occupancy Prediction & Intelligent Parking Assistant (Project 32)
-## School of Computing & Artificial Intelligence — Lovely Professional University (LPU)
+## School of Computer Science & Engineering — Lovely Professional University (LPU)
 
 [![Python](https://img.shields.io/badge/Python-3.12%20%7C%203.14-blue.svg)](https://www.python.org/)
 [![Ultralytics](https://img.shields.io/badge/YOLO-v8%20%2F%20v26-orange.svg)](https://ultralytics.com)
 [![FastAPI](https://img.shields.io/badge/FastAPI-v0.115-009688.svg)](https://fastapi.tiangolo.com)
 [![HTML5/Tailwind](https://img.shields.io/badge/Frontend-HTML5%20%7C%20TailwindCSS%20%7C%20Chart.js-38B2AC.svg)](https://tailwindcss.com)
 [![XGBoost](https://img.shields.io/badge/XGBoost-v2.1-red.svg)](https://xgboost.readthedocs.io/)
+[![SHAP](https://img.shields.io/badge/Explainability-TreeSHAP-brightgreen.svg)](https://shap.readthedocs.io/)
 
 ---
 
@@ -14,12 +15,16 @@
 This project delivers an end-to-end Machine Learning, Computer Vision, and Decision Support system for parking management across the 600-acre Lovely Professional University (LPU) campus in Phagwara, Punjab.
 
 Unlike traditional marked-stall sensor systems, this architecture addresses **open, unstructured campus grounds** using:
-1. **Perception**: Fine-tuned YOLO (`best.pt`) with Ground-Contact Point Jordan Ray-Casting Point-in-Polygon (PIP) and cross-camera Global Spatial NMS ($d < 2.5\text{m}$).
-2. **Zero-Leakage Time-Series Pipeline**: Multi-horizon forecasting ($+15, +30, +60$ min) with a chronological 70/15/15 split (1 h buffer), 22 causal features: sin/cos time, zone identity, event/exam flags, lags ($t-15 \dots t-60$), velocity and shifted rolling statistics. Hyperparameters live in `configs/model_config.yaml` (Optuna-tuned overrides in `configs/tuned_params.yaml`).
-3. **Dual-Head Architecture**: Direct XGBoost Regressor per horizon paired with a Saturation Classifier ($P(\text{Occ} \ge 90\%)$) that handles class imbalance with `scale_pos_weight` and is isotonic-calibrated on the validation period.
-4. **Inflection-Hour Evaluation**: On the simulated data, XGBoost cuts persistence MAE by roughly 67% inside $\pm 15$ minute class-transition windows (see Section 6 for caveats).
-5. **Anti-Herding Dispatcher**: Recommendation ranker that picks the lead lot among near-tied zones with softmax($\text{score}/\beta$) probabilities, so drivers are spread across equivalent lots.
-6. **Full-Stack Web Microservice**: High-performance asynchronous **FastAPI** backend with unified responsive **TailwindCSS & Chart.js** web interface (no Streamlit).
+1. **Perception**: Fine-tuned YOLO (`best.pt`, mAP50=91.6%) and Pretrained YOLO (`yolo26l.pt`) with Ground-Contact Point Jordan Ray-Casting Point-in-Polygon (PIP), cross-camera Global Spatial NMS ($d < 2.5\text{m}$), and OpenCV pre-inference quality diagnostics (blur, underexposure, glare); optional in-browser YOLO via WebGPU/WASM.
+2. **Zero-Leakage Time-Series Pipeline**: Multi-horizon forecasting ($+15, +30, +60$ min) with a chronological 70/15/15 split (1 h purge buffer) and 22 causal features: sin/cos time, zone identity, event/exam flags, lags ($t-15 \dots t-60$), velocity and shifted rolling statistics. All preprocessing lives in one persisted scikit-learn `Pipeline`/`ColumnTransformer`; hyperparameters are in `configs/model_config.yaml` (Optuna-tuned overrides in `configs/tuned_params.yaml`).
+3. **Multi-Model Comparative Benchmarking**: Persistence and zone-aware Seasonal Mean baselines, Ridge, Random Forest, LightGBM, a leak-free blend stack, and XGBoost tuned by Bayesian search (Optuna TPE vs random search) with `TimeSeriesSplit` cross-validation; an optional `GridSearchCV` runner is kept in `models/train.py --grid-search`.
+4. **Dual-Head Architecture**: Multi-horizon count regressor plus a Saturation Classifier ($P(\text{Occ} \ge 90\%)$) using `scale_pos_weight` and isotonic probability calibration on the validation period.
+5. **Uncertainty & Demand Forecasting**: 80% conformal prediction intervals (held-out coverage 0.81-0.82) and a calendar-only demand forecaster for days-ahead planning with exam/event what-if scenarios.
+6. **Explainable AI (SHAP)**: Global beeswarm and mean $|SHAP|$ rankings, dependence plots, local waterfall traces, and a live per-prediction breakdown at `GET /api/explain`.
+7. **Error Analysis & Diagnostics**: Residuals vs. fitted, Q-Q plots, per-zone / per-hour / per-regime error tables, worst-case review and classifier calibration.
+8. **Anti-Herding Traffic Dispersion**: A softmax lead-zone selector among near-tied lots plus a real-time `InFlightDispatchTracker` (15-minute TTL, 35% capacity cap) fed by `POST /api/navigate`.
+9. **Data Collection**: SQLite store of per-camera counts, summed per zone, with `POST /api/ingest` and an exporter that writes real observations in the training schema.
+10. **Full-Stack Web Microservice**: Asynchronous **FastAPI** backend with SlowAPI rate limiting, serving responsive multi-page **TailwindCSS & Chart.js** interfaces (admin alerts, heatmaps, 7-day demand outlook, zone usage profiles) and a static build for Render.
 
 ---
 
@@ -44,109 +49,117 @@ Calibrated against aerial surveys from `collab_content_backup/LPU PARKINGz`:
 
 ---
 
-## 3. Quick Start & Execution Guide
+## 3. Machine Learning Benchmark Results (Holdout Test Split)
+
+> **Data caveat.** The occupancy series in `data/processed/lpu_timeseries.csv` is **simulated** by `data_pipeline/generator.py` (12 zones, 5-minute cadence, 56 days) until real detector counts are logged. These results show that the pipeline works, not how well it would forecast real LPU traffic. A noise-free oracle on this simulator scores 3.38 cars MAE, so the tuned model is within ~0.3 cars of the ceiling.
+
+| Model Architecture | Forecast Horizon | Data Partition | MAE (Cars) | RMSE (Cars) | $R^2$ Score | Surge Inflection MAE |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| **Persistence Baseline** | +15 min | Holdout Test | 6.631 | 10.116 | 0.9794 | 15.329 |
+| **Seasonal Historical Mean** (zone × weekday × hour) | +15 min | Holdout Test | 6.354 | 9.925 | 0.9802 | — |
+| **Ridge Regression ($L_2$)** | +15 min | Holdout Test | 6.129 | 9.157 | 0.9831 | 15.290 |
+| **Random Forest Ensemble** | +15 min | Holdout Test | 4.163 | 5.673 | 0.9935 | 7.368 |
+| **Tuned XGBoost** (Optuna) | +15 min | Validation | 4.049 | 6.279 | 0.9918 | — |
+| **Tuned XGBoost** (Optuna) | +15 min | Holdout Test | **3.677** | **4.945** | **0.9951** | **5.027 (−67% vs Pers.)** |
+| **Tuned XGBoost** (Optuna) | +30 min | Holdout Test | 3.717 | 4.990 | 0.9950 | — |
+| **Tuned XGBoost** (Optuna) | +60 min | Holdout Test | 3.783 | 5.093 | 0.9948 | — |
+| **Saturation Classifier** (isotonic-calibrated) | +15 min | Holdout Test | — | — | — | **PR-AUC = 0.9041** (Recall: 75.0%, Precision 0.87) |
+
+Extended comparison (LightGBM, a chronological blend stack, default-vs-tuned XGBoost), Bayesian-vs-random search, error analysis and SHAP interpretation are in [`docs/results.md`](docs/results.md); raw tables are in `artifacts/model_comparison.csv` and `artifacts/model_comparison_full.csv`.
+
+---
+
+## 4. Quick Start & Execution Guide
 
 ### Prerequisites & Installation
 ```bash
 # Clone the repository
-git clone https://github.com/vibin-123/Campus-Parking-Occupancy-Prediction-Intelligent-Parking-Assistant.git
+git clone https://github.com/Mohd-Shujath-Ali/Campus-Parking-Occupancy-Prediction-Intelligent-Parking-Assistant.git
 cd Campus-Parking-Occupancy-Prediction-Intelligent-Parking-Assistant
 
 # Install pinned dependencies
 pip install -r requirements.txt
 ```
 
-### 1. Run End-to-End Training & Baseline Benchmarking
+### 1. Run End-to-End Training & Diagnostics
 ```bash
 python -m models.train
 ```
-*Outputs: loads `data/processed/lpu_timeseries.csv` (regenerate it with `python -m data_pipeline.generator`), fits Persistence, zone-aware Seasonal Mean and XGBoost models, and exports `artifacts/model_comparison.csv` plus serialised `.joblib`/`.ubj` models.*
+*Outputs: loads `data/processed/lpu_timeseries.csv` (regenerate with `python -m data_pipeline.generator`), fits the baselines, Ridge, Random Forest and tuned XGBoost (multi-horizon), the calibrated saturation classifier, conformal intervals and the demand forecaster; writes error-analysis plots (`residuals_vs_fitted.png`, `error_distribution_qq.png`, `error_by_zone_boxplot.png`), `artifacts/model_comparison.csv` and the serialised pipelines in `artifacts/pipelines/`. Add `--grid-search` for the quick `GridSearchCV` runner.*
 
-### 2. Launch FastAPI Web Application & API Server
-
-#### Option A: Run via Docker (Recommended)
+### 2. Generate Explainable AI (SHAP) Interpretability Suite
 ```bash
-# Start all containerized services with Docker Compose
-docker compose up --build -d
-
-# Check container status & health
-docker compose ps
-docker compose logs -f
+python -m explainability.shap_analysis
 ```
-See [DOCKER.md](DOCKER.md) for full containerization details and GPU configuration.
+*Outputs: Generates TreeSHAP summary beeswarm, feature importance bar charts, and local rush-hour / steady-state decision waterfalls to `artifacts/figures/`.*
 
-#### Option B: Run Locally
+### 3. Reproduce the extended experiments
+```bash
+python -m experiments.compare_models   # Ridge / RF / XGBoost / LightGBM / stacking vs baselines
+python -m experiments.tune_xgboost     # Optuna TPE vs random search -> configs/tuned_params.yaml
+python -m experiments.error_analysis   # per-zone / hour / regime errors, worst cases, classifier calibration
+python -m experiments.explain          # SHAP dependence and local plots
+```
+
+### 4. Launch FastAPI Web Application & API Server
 ```bash
 python -m uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
 ```
-- **Web App**: Open `http://localhost:8000/` in your browser for the responsive Driver Assistant & Campus Estate Console.
-- **REST API Docs**: Open `http://localhost:8000/docs` for interactive Swagger documentation.
+- **Driver Assistant**: `http://localhost:8000/` (Arrival horizon planning, anti-herding dispatch, counterfactual recommendations).
+- **Admin Command Center**: `http://localhost:8000/admin` (Real-time occupancy charts with 80% forecast ranges, operational alerts, camera sensor telemetry, invariant stream detection).
+- **Vision & ROI Studio**: `http://localhost:8000/vision` (Live webcam stream, interactive polygon/box ROI drawing, dual-model YOLO benchmarking).
+- **Model Analytics & XAI**: `http://localhost:8000/analytics` (Benchmark comparisons, SHAP attribution tabs, residual diagnostics, zone × hour demand heatmaps, 7-day demand outlook with exam/event scenarios).
+- **Campus Topology & Heatmap**: `http://localhost:8000/zones` (Live 12-zone congestion heatmap grid, grounds directory and per-zone usage profiles).
+- **Interactive REST Swagger**: `http://localhost:8000/docs`.
 
-### 3. Reproduce the experiments
-```bash
-python -m experiments.compare_models   # Ridge / RF / XGBoost / LightGBM / stacking vs baselines
-python -m experiments.tune_xgboost     # Optuna TPE vs random search, TimeSeriesSplit CV -> configs/tuned_params.yaml
-python -m models.train                 # fits + saves the deployed sklearn Pipelines (uses tuned params)
-python -m experiments.error_analysis   # per-zone / hour / regime errors, worst cases, classifier calibration
-python -m experiments.explain          # SHAP global + local explanations
-```
-
-### 4. Run Unit & Integration Tests
+### 5. Run Test Suite
 ```bash
 pytest tests/ -v
 ```
+*Runs the automated unit and integration tests (API endpoints, pipelines, intervals, demand forecast, data collection, anti-herding dispatch, history/stream-freeze logic, computer-vision filters). `test_detect_image_endpoint` needs `ultralytics`/`torch` installed.*
 
 ---
 
-## 4. REST API Documentation
+## 5. REST API Documentation
 
-- `GET /`: Serves the responsive web application dashboard.
-- `GET /api/health`: System status, active zones count, forecast horizons.
-- `GET /api/zones`: Full metadata for all 12 LPU parking grounds.
-- `GET /api/explain?zone_id=ZONE_BLOCK1&current_count=80`: SHAP breakdown of a forecast (base value + per-feature effect in cars).
+- `GET /api/health`, `GET /api/zones`: system status and metadata for all 12 zones.
+- `POST /api/predict`: occupancy forecast for a zone and horizon (+15/+30/+60 min) with an 80% interval (`predicted_low/high`), `lag_source` (`observed|partial|estimated`) and `stream_frozen`.
+- `GET /api/recommendations?destination=Block_26_CSE&horizon_minutes=15`: ranked parking grounds (destination matching is case/space tolerant); `POST /api/navigate` registers an in-flight driver dispatch.
+- `GET /api/snapshot`: all-zone forecast with forecast ranges and server-side alerts; `GET /api/metrics`: benchmark table and classifier metrics.
+- `GET /api/explain?zone_id=ZONE_BLOCK1&current_count=80`: SHAP breakdown of a forecast (base value + per-feature effect in cars); `GET /api/shap-figure/{name}`: generated diagnostic figures.
 - `GET /api/demand-forecast?days=7&zone_id=ZONE_MAINPARK_NORTH&exam_dates=2026-11-23`: days-ahead peak time/level per zone with exam/event what-if.
 - `GET /api/zone-analysis/{zone_id}` and `GET /api/heatmap?kind=zone_hour|zone_week|forecast`: usage profiles and heatmap matrices.
-- `POST /api/ingest` and `GET /api/observations/stats`: collect real camera counts (optional `X-API-Key`).
-- `POST /api/predict`: Forecast occupancy for given zone, current count, and horizon (+15, +30, +60 min).
-- `GET /api/recommendations?destination=Block_26_CSE&horizon_minutes=15`: Returns ranked viable parking grounds with walking distance, arrival availability, and smart tips.
+- `POST /api/ingest` and `GET /api/observations/stats`: collect real camera counts (optional `X-API-Key`, set `INGEST_API_KEY`).
+- `POST /api/detect-image`, `POST /api/detect-frame`: YOLO detection (rate limited).
 
 ---
 
-## 5. Data Sources, Results & Limitations
+## 6. Data Sources, Serving Notes & Limitations
 
-**Occupancy time series (important).** `data/processed/lpu_timeseries.csv` is **simulated** by `data_pipeline/generator.py` (12 zones, 5-minute cadence, 56 days from 2026-09-01) from hand-written daily profiles per zone category, plus class-bell surges, an exam week, a campus event, rain days, a camera outage and Gaussian noise (σ = 2.5% of capacity). It is a stand-in until real detector counts are logged. Because the target is generated from these same profiles, scores below show that the pipeline works, **not** how well it would forecast real LPU traffic.
+**Occupancy time series.** Simulated (see the caveat in Section 3). Replace it with real counts using the ingest endpoint and `python -m data_collection.store --out data/processed/lpu_live.csv`.
 
 **Vision data.** The YOLO training images in `collab_content_backup/LPU---Parking-1` come from a Roboflow export (licence CC BY 4.0, see its `README.roboflow.txt`). The image file names follow the timestamp pattern of the public PKLot dataset, so confirm the original source and cite it before submission.
 
-**Current results** (chronological hold-out, +15 min unless stated; simulated data; full write-up in [`docs/results.md`](docs/results.md)):
+**Serving.** `/api/predict` builds lags from a rolling per-zone history (`models/history.py`, shared with `/api/ingest`) and reports `lag_source`; a frozen camera feed (6 identical readings over at least 10 minutes) sets `stream_frozen`. Counts in `/api/recommendations` and `/api/snapshot` are simulated demo values until the camera counter feeds the history buffer.
 
-| Model | MAE (cars) | RMSE | R² | MAE in bell windows |
-| :--- | :---: | :---: | :---: | :---: |
-| Persistence | 6.63 | 10.12 | 0.979 | 15.33 |
-| Seasonal mean (zone x weekday x hour) | 6.35 | 9.93 | 0.980 | 12.95 |
-| Ridge | 6.13 | 9.16 | 0.983 | 15.29 |
-| Random Forest | 4.16 | 5.68 | 0.994 | 7.34 |
-| LightGBM | 4.41 | 6.01 | 0.993 | 6.89 |
-| XGBoost (config defaults) | 4.21 | 5.71 | 0.993 | 6.32 |
-| Stacking (RF + tuned XGB + LGBM) | 3.94 | 5.34 | 0.994 | 6.03 |
-| **XGBoost (Optuna-tuned)** | **3.68** | **4.95** | **0.995** | **5.05** |
+**Known limitations.** The test period contains no exam or event days (they fall in train/validation), so those regimes are not evaluated; intervals are calibrated on a single validation window; tuned parameters were searched at +15 min and reused for +30/+60. Demand-forecast exam/event effects rest on one exam week and two event days. The notebooks in `notebooks/01_exploratory_data_analysis.ipynb` and `02_model_training_and_tuning.ipynb` use their own simpler `GridSearchCV` run (MAE 4.9 at +15 min), which is weaker than the Optuna-tuned model used by the API (3.68).
 
-Tuned XGBoost: 3.72 / 3.79 MAE at +30 / +60 min (persistence 9.46 / 14.84). Bayesian search beat random search with the same 30-trial budget (CV MAE 4.43 vs 4.50). The best a forecaster could do on this simulator (noise-free oracle) is 3.38 cars, so the model is within ~0.3 cars of the ceiling and the data, not the model, is now the limiting factor. The saturation classifier is isotonic-calibrated on the validation period (precision 0.87, recall 0.75, PR-AUC 0.90 at threshold 0.5).
-
-**Explainability.** SHAP (global, dependence and local plots in `artifacts/figures/shap_*.png`, interpretation in `docs/results.md`); live per-prediction breakdown at `GET /api/explain`.
-
-**EDA.** [`notebooks/01_eda.ipynb`](notebooks/01_eda.ipynb) (data quality, distributions, daily/weekly patterns, special regimes, autocorrelation, class imbalance, split composition).
-
-**Serving.** `/api/predict` builds lags from a rolling per-zone history (`models/history.py`) and returns `lag_source` (`observed`, `partial` or `estimated`). Counts in `/api/recommendations` are simulated demo values (`count_source: simulated`) until the camera counter feeds the history buffer.
-
-**Also implemented:** 80% conformal prediction intervals (test coverage 0.81-0.82), calendar-based demand forecasting with exam/event what-if (occupancy MAE 2.7% of capacity vs 3.4% seasonal mean), zone-level analysis, heatmaps, admin alerts and a camera-count ingest + export pipeline (see `docs/results.md` section 7).
-
-**Not yet done:** real (logged) occupancy data actually collected, public deployment, rolling-origin evaluation that holds out an exam week, drift monitoring.
+**Not yet done:** real (logged) occupancy data actually collected, public deployment of the API, rolling-origin evaluation that holds out an exam week, drift monitoring.
 
 ---
 
-## 6. Team Contribution (Rubric Component 10)
+## 7. Jupyter Research Notebooks
 
-- **Mohammed Shujath Ali (12404599)**: Forecasting architecture, XGBoost forecaster, full-stack FastAPI + Tailwind web dashboard, temporal feature pipeline, project coordination.
-- **SREEVYAS CS (12400848)**: Computer vision ROI polygon management, Ground contact point geometry, cross-camera Spatial NMS deduplication, FastAPI REST service, unit testing.
-- **Dr. Mohit Arora (Faculty Supervisor)**: Project guidance and academic evaluation.
+The `notebooks/` directory contains structured, reproducible experiments aligned with the course rubrics:
+- `notebooks/01_exploratory_data_analysis.ipynb`: Data quality checks, ADF stationarity tests, ACF/PACF lag selection, bell surge distributions, exam period density shifts, saturation class imbalance, and correlation heatmaps.
+- `notebooks/02_model_training_and_tuning.ipynb`: Chronological train/val/test splitting, baseline vs. ML model comparisons, TimeSeriesSplit GridSearchCV curves, surge inflection error breakdown, and dual-head classification evaluation.
+- `notebooks/01_eda.ipynb`: a second, independent EDA covering data quality, distributions, daily/weekly patterns, special regimes, autocorrelation, class imbalance and split composition.
+- `notebooks/smote_experiment.ipynb`: Oversampling and imbalance handling experiments.
+
+---
+
+## 8. Team Contributions
+
+- **Mohammed Shujath Ali (12404599)**: Forecasting architecture, TimeSeriesSplit hyperparameter tuning, TreeSHAP interpretability, full-stack FastAPI microservice, TailwindCSS/Chart.js frontends, anti-herding dispatch tracker, and project coordination.
+- **SREEVYAS CS (12400848)**: Computer vision ROI polygon management, Ground contact point geometry, cross-camera Spatial NMS deduplication, image degradation diagnostics, test suite development.
+- **Dr. Mohit Arora (Faculty Supervisor)**: Project mentorship, technical guidance, and academic evaluation.

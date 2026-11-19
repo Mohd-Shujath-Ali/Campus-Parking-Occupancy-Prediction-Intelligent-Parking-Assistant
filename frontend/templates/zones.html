@@ -18,6 +18,28 @@
         </span>
     </div>
 
+    <!-- Real-Time Congestion Heatmap Grid (12 Zones) -->
+    <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-3">
+        <div class="flex flex-col sm:flex-row justify-between sm:items-center border-b border-slate-100 pb-3 gap-2">
+            <div>
+                <h3 class="font-bold text-slate-900 text-sm flex items-center space-x-2">
+                    <i class="fa-solid fa-fire-flame-curved text-orange-600"></i>
+                    <span>Campus-Wide Congestion Heatmap (Real-Time Snapshot)</span>
+                </h3>
+                <p class="text-xs text-slate-500">Live occupancy ratio, operational capacity, and congestion status across all 12 zones</p>
+            </div>
+            <div class="flex items-center space-x-3 text-xs">
+                <span class="flex items-center space-x-1.5"><span class="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block"></span><span class="text-slate-600">&lt;65% Free</span></span>
+                <span class="flex items-center space-x-1.5"><span class="w-2.5 h-2.5 rounded-full bg-amber-500 inline-block"></span><span class="text-slate-600">65-85% Moderate</span></span>
+                <span class="flex items-center space-x-1.5"><span class="w-2.5 h-2.5 rounded-full bg-rose-500 inline-block"></span><span class="text-slate-600">&gt;85% Saturated</span></span>
+                <span id="heatmapTimestamp" class="font-mono text-slate-400 pl-2">Live</span>
+            </div>
+        </div>
+        <div id="heatmapGrid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3 pt-2">
+            <div class="col-span-full py-4 text-center text-xs text-slate-400">Loading live zone snapshot…</div>
+        </div>
+    </div>
+
     <!-- Grounds Directory Grid -->
     <div id="zonesGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
         <div class="p-10 text-center text-slate-400 bg-white rounded-2xl border border-slate-200 col-span-full">

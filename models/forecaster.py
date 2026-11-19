@@ -14,20 +14,22 @@ class MultiHorizonForecaster:
     Manages direct multi-horizon estimators (H=15, H=30, H=60 minutes)
     and benchmarks them against Persistence and Historical Mean baselines.
     """
-    def __init__(self, model_type: str = "xgboost", use_pipeline: bool = True):
+    def __init__(self, model_type: str = "xgboost", use_pipeline: bool = True,
+                 params: Dict[str, Any] = None):
         self.model_type = model_type
         self.use_pipeline = use_pipeline
+        self.params = params or {}          # optional overrides on top of model_config.yaml
         self.models: Dict[str, Any] = {}
         self.horizons = ["H15", "H30", "H60"]
 
     def _get_estimator(self):
         """Hyperparameters come from configs/model_config.yaml."""
         if self.model_type == "ridge":
-            return Ridge(**xgb_params("ridge"))
+            return Ridge(**{**xgb_params("ridge"), **self.params})
         elif self.model_type == "random_forest":
-            return RandomForestRegressor(**xgb_params("random_forest"))
+            return RandomForestRegressor(**{**xgb_params("random_forest"), **self.params})
         elif self.model_type == "xgboost":
-            return xgb.XGBRegressor(**xgb_params("xgboost_regressor"))
+            return xgb.XGBRegressor(**{**xgb_params("xgboost_regressor"), **self.params})
         else:
             raise ValueError(f"Unknown model_type: {self.model_type}")
 

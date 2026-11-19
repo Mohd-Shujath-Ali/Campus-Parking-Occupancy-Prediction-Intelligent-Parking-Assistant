@@ -88,7 +88,59 @@ async function toggleWebcamDetection() {
         badge.className   = 'text-xs px-2.5 py-0.5 rounded-full font-bold bg-orange-100 text-orange-700 animate-pulse border border-orange-200';
         stats.classList.remove('hidden');
         await captureAndDetect();
-        detectionIntervalId = setInterval(captureAndDetect, 1800);
+        const mode = document.getElementById('executionModeSelect')?.value || 'client';
+        const intervalMs = mode === 'client' ? 180 : 1800;
+        detectionIntervalId = setInterval(captureAndDetect, intervalMs);
+    }
+}
+
+function drawBoundingBoxes(ctx, detections, roiPolygon) {
+    if (!detections) return;
+
+    // Draw ROI polygon if present
+    if (roiPolygon && roiPolygon.length >= 3) {
+        ctx.save();
+        ctx.strokeStyle = '#f97316';
+        ctx.lineWidth = 3;
+        ctx.fillStyle = 'rgba(249, 115, 22, 0.15)';
+        ctx.beginPath();
+        ctx.moveTo(roiPolygon[0][0], roiPolygon[0][1]);
+        for (let i = 1; i < roiPolygon.length; i++) {
+            ctx.lineTo(roiPolygon[i][0], roiPolygon[i][1]);
+        }
+        ctx.closePath();
+        ctx.stroke();
+        ctx.fill();
+        ctx.restore();
+    }
+
+    // Draw detections
+    for (const d of detections) {
+        ctx.save();
+        const inRoi = d.inRoi !== false;
+        const color = inRoi ? '#10b981' : 'rgba(239, 68, 68, 0.7)';
+        ctx.strokeStyle = color;
+        ctx.lineWidth = inRoi ? 3 : 1.5;
+        ctx.strokeRect(d.x1, d.y1, d.w, d.h);
+
+        // Ground contact point
+        if (d.contactPoint) {
+            ctx.fillStyle = inRoi ? '#34d399' : '#f87171';
+            ctx.beginPath();
+            ctx.arc(d.contactPoint[0], d.contactPoint[1], 4, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        // Label tag
+        const text = `${d.className || 'Car'} ${Math.round((d.confidence || 0) * 100)}%`;
+        ctx.font = 'bold 12px sans-serif';
+        const textW = ctx.measureText(text).width;
+        ctx.fillStyle = color;
+        ctx.fillRect(d.x1, Math.max(0, d.y1 - 18), textW + 8, 18);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText(text, d.x1 + 4, Math.max(14, d.y1 - 4));
+
+        ctx.restore();
     }
 }
 
@@ -96,8 +148,35 @@ async function captureAndDetect() {
     if (!webcamStream || !isDetecting) return;
     const video  = document.getElementById('webcamVideo');
     const canvas = document.getElementById('hiddenWebcamCanvas');
+    const ann    = document.getElementById('webcamAnnotatedImg');
     if (!video.videoWidth) return;
 
+    const mode = document.getElementById('executionModeSelect')?.value || 'client';
+
+    if (mode === 'client' && window.clientYOLO) {
+        try {
+            const res = await window.clientYOLO.detect(video, 'best', roiPoints);
+            canvas.width  = video.videoWidth;
+            canvas.height = video.videoHeight;
+            const ctx = canvas.getContext('2d');
+            ctx.drawImage(video, 0, 0);
+            drawBoundingBoxes(ctx, res.rawDetections, roiPoints);
+
+            ann.src = canvas.toDataURL('image/jpeg', 0.82);
+            ann.classList.remove('hidden');
+            video.classList.remove('hidden');
+
+            const hwLabel = window.clientYOLO.hasWebGPU ? 'WebGPU' : 'WASM';
+            setText('webcamCarCount', res.roiCount);
+            setText('webcamLatency', `${res.latencyMs}ms (${hwLabel})`);
+            fpsFrames += 1;
+        } catch (err) {
+            console.warn('Client-side frame inference error:', err);
+        }
+        return;
+    }
+
+    // Server fallback path
     canvas.width  = video.videoWidth;
     canvas.height = video.videoHeight;
     canvas.getContext('2d').drawImage(video, 0, 0);
@@ -107,17 +186,19 @@ async function captureAndDetect() {
         const fd = new FormData();
         fd.append('file', blob, 'frame.jpg');
         try {
-            const res = await fetch('/api/detect-frame', { method: 'POST', body: fd });
+            const url = window.apiUrl ? window.apiUrl('/api/detect-frame') : '/api/detect-frame';
+            const res = await fetch(url, { method: 'POST', body: fd });
             if (!res.ok) return;
             const d = await res.json();
             if (d.annotated_image_base64) {
-                const ann = document.getElementById('webcamAnnotatedImg');
                 ann.src = 'data:image/jpeg;base64,' + d.annotated_image_base64;
                 ann.classList.remove('hidden');
-                document.getElementById('webcamVideo').classList.add('hidden');
+                // Ensure video remains active in DOM so canvas.drawImage continues grabbing frames
+                const videoEl = document.getElementById('webcamVideo');
+                if (videoEl) videoEl.classList.remove('hidden');
                 const count = d.vehicle_count !== undefined ? d.vehicle_count : (d.vehicle_count_total || 0);
                 setText('webcamCarCount', count);
-                setText('webcamLatency',  d.inference_time_ms + 'ms');
+                setText('webcamLatency',  d.inference_time_ms + 'ms (Server)');
                 fpsFrames += 1 / (1800 / 1000);
             }
         } catch (err) {
@@ -279,15 +360,125 @@ function redrawRoiCanvas() {
     ctx.restore();
 }
 
+async function runDetectionClientSide(modelChoice) {
+    const img = new Image();
+    const objectUrl = URL.createObjectURL(selectedImageFile);
+    img.src = objectUrl;
+    await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = reject;
+    });
+
+    let resBest = null;
+    let resYolo = null;
+
+    if (modelChoice === 'both' || modelChoice === 'best') {
+        resBest = await window.clientYOLO.detect(img, 'best', roiPoints);
+    }
+    if (modelChoice === 'both' || modelChoice === 'yolo26l') {
+        resYolo = await window.clientYOLO.detect(img, 'yolo26l', roiPoints);
+    }
+
+    function getAnnotatedB64(detections) {
+        const c = document.createElement('canvas');
+        c.width = img.naturalWidth || img.width;
+        c.height = img.naturalHeight || img.height;
+        const ctx = c.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+        drawBoundingBoxes(ctx, detections, roiPoints);
+        return c.toDataURL('image/jpeg', 0.88).replace(/^data:image\/jpeg;base64,/, '');
+    }
+
+    const b64Best = resBest ? getAnnotatedB64(resBest.rawDetections) : '';
+    const b64Yolo = resYolo ? getAnnotatedB64(resYolo.rawDetections) : '';
+
+    const bestCount = resBest ? (roiPoints.length >= 3 ? resBest.roiCount : resBest.totalCount) : 0;
+    const yoloCount = resYolo ? (roiPoints.length >= 3 ? resYolo.roiCount : resYolo.totalCount) : 0;
+    const countDelta = bestCount - yoloCount;
+
+    const timeBest = resBest ? resBest.latencyMs : 0;
+    const timeYolo = resYolo ? resYolo.latencyMs : 0;
+
+    let speedText = 'Client Hardware Accelerated';
+    if (timeBest > 0 && timeYolo > 0) {
+        speedText = timeBest <= timeYolo
+            ? `best.pt is ${Math.round(timeYolo / timeBest * 10) / 10}x faster (${timeBest}ms vs ${timeYolo}ms)`
+            : `yolo26l is ${Math.round(timeBest / timeYolo * 10) / 10}x faster (${timeYolo}ms vs ${timeBest}ms)`;
+    }
+
+    const hwLabel = window.clientYOLO.hasWebGPU ? 'Local WebGPU (GPU)' : 'Local WASM (CPU SIMD)';
+
+    const bullets = [
+        `Executed directly on client system hardware using ${hwLabel}.`,
+        `Custom LPU model detected ${bestCount} vehicles in target region (${timeBest}ms).`,
+        `Pretrained baseline detected ${yoloCount} vehicles in target region (${timeYolo}ms).`,
+        countDelta > 0
+            ? `Fine-tuned best.pt detected ${countDelta} additional vehicle(s) adapted to campus parking lots.`
+            : `Both models achieved consistent counts in the designated region.`
+    ];
+
+    const data = {
+        roi_defined: roiPoints.length >= 3,
+        best_model: resBest ? {
+            model_name: 'Custom LPU Fine-Tuned (best.pt)',
+            vehicle_count_roi: resBest.roiCount,
+            vehicle_count_total: resBest.totalCount,
+            avg_confidence: resBest.rawDetections.length ? (resBest.rawDetections.reduce((s, d) => s + d.confidence, 0) / resBest.rawDetections.length) : 0.0,
+            inference_time_ms: resBest.latencyMs,
+            annotated_image_base64: b64Best,
+        } : {},
+        yolo26l_model: resYolo ? {
+            model_name: 'Pretrained YOLO26 Large (yolo26l.pt)',
+            vehicle_count_roi: resYolo.roiCount,
+            vehicle_count_total: resYolo.totalCount,
+            avg_confidence: resYolo.rawDetections.length ? (resYolo.rawDetections.reduce((s, d) => s + d.confidence, 0) / resYolo.rawDetections.length) : 0.0,
+            inference_time_ms: resYolo.latencyMs,
+            annotated_image_base64: b64Yolo,
+        } : {},
+        comparison: {
+            target_region: roiPoints.length >= 3 ? 'Selected ROI' : 'Full Lot',
+            best_count: bestCount,
+            yolo26l_count: yoloCount,
+            count_delta: countDelta,
+            best_latency_ms: timeBest,
+            yolo26l_latency_ms: timeYolo,
+            speed_summary: `${speedText} · ${hwLabel}`,
+            analysis_bullets: bullets
+        }
+    };
+
+    URL.revokeObjectURL(objectUrl);
+    renderDualModelResults(data);
+}
+
 async function uploadAndDetectImage() {
     if (!selectedImageFile) return;
+
+    if (roiPoints.length > 0 && roiPoints.length < 3) {
+        alert('Please complete the ROI polygon with at least 3 vertices (or click "Clear ROI" to detect the full lot).');
+        return;
+    }
 
     const btn = document.getElementById('btnRunDetect');
     const lbl = document.getElementById('btnDetectLabel');
     const modelChoice = document.getElementById('modelChoiceSelect')?.value || 'both';
+    const mode = document.getElementById('executionModeSelect')?.value || 'client';
 
     btn.disabled = true;
     lbl.textContent = 'Processing YOLO Inference…';
+
+    if (mode === 'client' && window.clientYOLO) {
+        try {
+            await runDetectionClientSide(modelChoice);
+        } catch (err) {
+            console.error('Client detection failed:', err);
+            alert('Client detection error: ' + err.message);
+        } finally {
+            btn.disabled = false;
+            lbl.textContent = 'Run Detection & Compare in ROI';
+        }
+        return;
+    }
 
     const fd = new FormData();
     fd.append('file', selectedImageFile);
@@ -298,7 +489,8 @@ async function uploadAndDetectImage() {
     }
 
     try {
-        const res = await fetch('/api/detect-image', { method: 'POST', body: fd });
+        const url = window.apiUrl ? window.apiUrl('/api/detect-image') : '/api/detect-image';
+        const res = await fetch(url, { method: 'POST', body: fd });
         if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
         const data = await res.json();
         renderDualModelResults(data);
@@ -315,35 +507,75 @@ function renderDualModelResults(data) {
     if (!wrap) return;
     wrap.classList.remove('hidden');
 
+    const modelChoice = document.getElementById('modelChoiceSelect')?.value || 'both';
     const comp = data.comparison || {};
-    const best = data.best_model || {};
-    const yolo = data.yolo26l_model || {};
+    const best = data.best_model || (modelChoice === 'best' ? data : {});
+    const yolo = data.yolo26l_model || (modelChoice === 'yolo26l' ? data : {});
 
-    setText('compHeaderRegion', `Target Region: ${comp.target_region || 'Selected ROI'}`);
-    setText('compSpeedBadge', comp.speed_summary || 'Inference Complete');
+    setText('compHeaderRegion', `Target Region: ${comp.target_region || (data.roi_defined ? 'Custom ROI' : 'Full Parking Lot')}`);
+    setText('compSpeedBadge', comp.speed_summary || `${modelChoice.toUpperCase()} Inference Complete`);
 
-    setText('bestCountRoi', best.vehicle_count_roi ?? data.vehicle_count_roi ?? 0);
-    setText('bestCountTotal', best.vehicle_count_total ?? data.vehicle_count_total ?? 0);
-    setText('bestAvgConf', Math.round((best.avg_confidence || 0) * 100) + '%');
-    setText('bestLatency', (best.inference_time_ms || data.inference_time_ms || 0) + ' ms');
+    // Best Model Card
+    const bestCard = document.getElementById('cardBestModel');
+    if (modelChoice === 'yolo26l') {
+        if (bestCard) bestCard.classList.add('opacity-40');
+        setText('bestCountRoi', '—');
+        setText('bestCountTotal', '—');
+        setText('bestAvgConf', 'Not Run');
+        setText('bestLatency', '—');
+    } else {
+        if (bestCard) bestCard.classList.remove('opacity-40');
+        setText('bestCountRoi', best.vehicle_count_roi ?? data.vehicle_count_roi ?? 0);
+        setText('bestCountTotal', best.vehicle_count_total ?? data.vehicle_count_total ?? 0);
+        const conf = best.avg_confidence !== undefined ? Math.round(best.avg_confidence * 100) + '%' : (data.avg_confidence ? Math.round(data.avg_confidence * 100) + '%' : '—');
+        setText('bestAvgConf', conf);
+        setText('bestLatency', (best.inference_time_ms || data.inference_time_ms || 0) + ' ms');
+    }
 
-    setText('yolo26lCountRoi', yolo.vehicle_count_roi ?? 0);
-    setText('yolo26lCountTotal', yolo.vehicle_count_total ?? 0);
-    setText('yolo26lAvgConf', Math.round((yolo.avg_confidence || 0) * 100) + '%');
-    setText('yolo26lLatency', (yolo.inference_time_ms || 0) + ' ms');
+    // YOLO26l Card
+    const yoloCard = document.getElementById('cardYolo26l');
+    if (modelChoice === 'best') {
+        if (yoloCard) yoloCard.classList.add('opacity-40');
+        setText('yolo26lCountRoi', '—');
+        setText('yolo26lCountTotal', '—');
+        setText('yolo26lAvgConf', 'Not Run');
+        setText('yolo26lLatency', '—');
+    } else {
+        if (yoloCard) yoloCard.classList.remove('opacity-40');
+        setText('yolo26lCountRoi', yolo.vehicle_count_roi ?? (modelChoice === 'yolo26l' ? data.vehicle_count_roi : 0));
+        setText('yolo26lCountTotal', yolo.vehicle_count_total ?? (modelChoice === 'yolo26l' ? data.vehicle_count_total : 0));
+        const conf = yolo.avg_confidence !== undefined ? Math.round(yolo.avg_confidence * 100) + '%' : '—';
+        setText('yolo26lAvgConf', conf);
+        setText('yolo26lLatency', (yolo.inference_time_ms || (modelChoice === 'yolo26l' ? data.inference_time_ms : 0)) + ' ms');
+    }
 
+    // Annotated images
     const imgBest = document.getElementById('imgBestAnnotated');
-    const b64Best = best.annotated_image_base64 || data.annotated_image_base64;
+    const b64Best = best.annotated_image_base64 || (modelChoice === 'best' ? data.annotated_image_base64 : '');
     if (imgBest && b64Best) imgBest.src = 'data:image/jpeg;base64,' + b64Best;
 
     const imgYolo = document.getElementById('imgYolo26lAnnotated');
-    const b64Yolo = yolo.annotated_image_base64;
+    const b64Yolo = yolo.annotated_image_base64 || (modelChoice === 'yolo26l' ? data.annotated_image_base64 : '');
     if (imgYolo && b64Yolo) imgYolo.src = 'data:image/jpeg;base64,' + b64Yolo;
 
     const bulletsList = document.getElementById('compAnalysisBullets');
-    if (bulletsList && comp.analysis_bullets) {
-        bulletsList.innerHTML = comp.analysis_bullets.map(b => `<li>${b}</li>`).join('');
+    if (bulletsList) {
+        if (comp.analysis_bullets && comp.analysis_bullets.length > 0) {
+            bulletsList.innerHTML = comp.analysis_bullets.map(b => `<li>${b}</li>`).join('');
+        } else {
+            bulletsList.innerHTML = `<li>Executed single-model evaluation (${modelChoice.toUpperCase()}) across selected detection region.</li>`;
+        }
     }
 
     wrap.scrollIntoView({ behavior: 'smooth' });
 }
+
+document.addEventListener('DOMContentLoaded', () => {
+    if (window.clientYOLO) {
+        const hw = window.clientYOLO.getHardwareInfo();
+        const txt = document.getElementById('hardwareAccelText');
+        if (txt) txt.textContent = hw.mode;
+        // Pre-warm the lightweight int8 model into user hardware memory
+        window.clientYOLO.loadModel('best').catch(() => {});
+    }
+});

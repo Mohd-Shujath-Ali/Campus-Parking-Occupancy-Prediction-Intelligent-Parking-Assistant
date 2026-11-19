@@ -52,6 +52,8 @@ COPY --chown=appuser:appgroup features/ ./features/
 COPY --chown=appuser:appgroup frontend/ ./frontend/
 COPY --chown=appuser:appgroup models/ ./models/
 COPY --chown=appuser:appgroup recommendation/ ./recommendation/
+COPY --chown=appuser:appgroup utils/ ./utils/
+COPY --chown=appuser:appgroup data_collection/ ./data_collection/
 
 # Switch to non-root user
 USER appuser

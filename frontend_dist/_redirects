@@ -1,0 +1,5 @@
+/admin        /admin.html        200
+/vision       /vision.html       200
+/analytics    /analytics.html    200
+/zones        /zones.html        200
+/*            /index.html        200

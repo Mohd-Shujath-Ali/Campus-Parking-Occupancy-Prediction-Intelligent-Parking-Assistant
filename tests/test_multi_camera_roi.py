@@ -41,3 +41,15 @@ def test_cross_camera_deduplication():
     assert summary["deduplicated_count"] == 2
     assert summary["duplicates_removed"] == 1
     assert summary["reporting_cameras"] == ["CAM1", "CAM2"] or summary["reporting_cameras"] == ["CAM2", "CAM1"]
+
+def test_cross_camera_missing_ground_coords_resilience():
+    counter = MultiCameraOccupancyCounter(zone_id="ZONE_B", operational_capacity=50)
+    # Detections without ground_coords should not crash deduplication
+    dets = [
+        {"confidence": 0.90, "camera_id": "CAM1"},
+        {"ground_coords": None, "confidence": 0.85, "camera_id": "CAM2"},
+        {"ground_coords": (5.0, 10.0), "confidence": 0.95, "camera_id": "CAM1"}
+    ]
+    summary = counter.compute_zone_occupancy(dets, timestamp="2026-11-12 11:00:00")
+    assert summary["deduplicated_count"] == 3
+    assert summary["duplicates_removed"] == 0
