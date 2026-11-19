@@ -52,3 +52,8 @@ Thumbs.db
 
 # Collected live observations (local data, not source)
 data/live/
+
+# Generated outputs (recreate with the commands in the README)
+frontend_dist/
+artifacts/pipelines/rf_forecaster.joblib
+artifacts/pipelines/ridge_forecaster.joblib
