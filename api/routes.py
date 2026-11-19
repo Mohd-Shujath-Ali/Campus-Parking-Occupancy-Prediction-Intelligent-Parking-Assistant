@@ -16,7 +16,9 @@ from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 from typing import List, Dict, Any, Optional
 
-from api.schemas import PredictionRequest, PredictionResponse, RecommendationResponse, ZoneRankItem
+from api.schemas import PredictionRequest, PredictionResponse, RecommendationResponse, ZoneRankItem, IngestRequest
+from data_collection.store import ObservationStore, DEFAULT_DB
+from fastapi import Header
 from recommendation.parking_ranker import ParkingRanker
 from models.inference import predict_zone, predict_all_zones, models_ready, _build_feature_row
 from models.history import HISTORY
@@ -136,6 +138,53 @@ def predict_occupancy(req: PredictionRequest):
         confidence_level=confidence,
         lag_source=result.get("lag_source", "estimated"),
     )
+
+
+# ---------------------------------------------------------------------------
+# Data collection — camera counts in, training data out
+# ---------------------------------------------------------------------------
+
+_store: Optional[ObservationStore] = None
+
+
+def get_store() -> ObservationStore:
+    global _store
+    if _store is None:
+        _store = ObservationStore(os.environ.get("PARKING_DB", DEFAULT_DB))
+    return _store
+
+
+@router.post("/ingest")
+def ingest_observation(req: IngestRequest, x_api_key: Optional[str] = Header(None)):
+    """
+    Store one camera's vehicle count. The zone total for the 5-minute bucket is the sum over
+    all cameras reporting for that zone, and it is pushed into the rolling history so the next
+    forecast uses real lags (`lag_source: observed`).
+    If INGEST_API_KEY is set, the caller must send it in the `X-API-Key` header.
+    """
+    required = os.environ.get("INGEST_API_KEY")
+    if required and x_api_key != required:
+        raise HTTPException(status_code=401, detail="Invalid or missing X-API-Key.")
+    if req.zone_id not in ZONES_MAP:
+        raise HTTPException(status_code=404, detail=f"Zone '{req.zone_id}' not found.")
+    try:
+        ts = datetime.fromisoformat(req.timestamp) if req.timestamp else datetime.now(_IST)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="timestamp must be ISO 8601 format.")
+    cam = req.camera_id or ZONES_MAP[req.zone_id]["camera_id"]
+    res = get_store().record(req.zone_id, cam, req.count, ts, req.source)
+    HISTORY.record(req.zone_id, res["bucket"], res["zone_total"])
+    cap = ZONES_MAP[req.zone_id]["operational_capacity"]
+    return {"zone_id": req.zone_id, "bucket": res["bucket"].isoformat(),
+            "zone_total": res["zone_total"], "cameras_reporting": res["cameras_reporting"],
+            "occupancy_rate": round(res["zone_total"] / cap, 4),
+            "over_capacity": res["zone_total"] > cap}
+
+
+@router.get("/observations/stats")
+def observation_stats():
+    """How much real data has been collected so far."""
+    return get_store().stats()
 
 
 # ---------------------------------------------------------------------------

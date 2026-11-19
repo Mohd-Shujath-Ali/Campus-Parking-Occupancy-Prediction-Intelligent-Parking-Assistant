@@ -46,3 +46,11 @@ class RecommendationResponse(BaseModel):
     horizon_minutes: int
     recommended_zones: List[ZoneRankItem]
     counterfactual_tip: Optional[str] = None
+
+
+class IngestRequest(BaseModel):
+    zone_id: str = Field(..., description="Zone the camera belongs to")
+    count: int = Field(..., ge=0, le=2000, description="Deduplicated vehicle count in this camera's ROI")
+    camera_id: Optional[str] = Field(None, description="Defaults to the zone's configured camera")
+    timestamp: Optional[str] = Field(None, description="ISO 8601; defaults to now (IST)")
+    source: str = Field("camera", description="camera | manual | simulator")

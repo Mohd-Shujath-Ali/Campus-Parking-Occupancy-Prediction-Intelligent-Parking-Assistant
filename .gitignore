@@ -49,3 +49,6 @@ Thumbs.db
 !models/weights/yolo26l.pt
 !collab_content_backup/runs/detect/train/weights/best.pt
 !collab_content_backup/yolo26l.pt
+
+# Collected live observations (local data, not source)
+data/live/
