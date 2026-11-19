@@ -139,7 +139,7 @@ Tuned XGBoost: 3.72 / 3.79 MAE at +30 / +60 min (persistence 9.46 / 14.84). Baye
 
 **Serving.** `/api/predict` builds lags from a rolling per-zone history (`models/history.py`) and returns `lag_source` (`observed`, `partial` or `estimated`). Counts in `/api/recommendations` are simulated demo values (`count_source: simulated`) until the camera counter feeds the history buffer.
 
-**Also implemented:** 80% conformal prediction intervals (test coverage 0.81-0.83), calendar-based demand forecasting with exam/event what-if (occupancy MAE 2.7% of capacity vs 3.4% seasonal mean), zone-level analysis, heatmaps, admin alerts and a camera-count ingest + export pipeline (see `docs/results.md` section 7).
+**Also implemented:** 80% conformal prediction intervals (test coverage 0.81-0.82), calendar-based demand forecasting with exam/event what-if (occupancy MAE 2.7% of capacity vs 3.4% seasonal mean), zone-level analysis, heatmaps, admin alerts and a camera-count ingest + export pipeline (see `docs/results.md` section 7).
 
 **Not yet done:** real (logged) occupancy data actually collected, public deployment, rolling-origin evaluation that holds out an exam week, drift monitoring.
 

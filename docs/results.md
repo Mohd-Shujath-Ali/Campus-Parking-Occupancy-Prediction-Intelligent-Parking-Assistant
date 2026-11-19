@@ -105,11 +105,11 @@ python -m experiments.explain              # section 5
 
 | Horizon | Test coverage | Mean width (cars) |
 |---|---:|---:|
-| +15 min | 0.808 | 14.0 |
-| +30 min | 0.815 | 14.2 |
-| +60 min | 0.826 | 14.9 |
+| +15 min | 0.811 | 16.5 |
+| +30 min | 0.815 | 17.1 |
+| +60 min | 0.822 | 18.2 |
 
-Coverage is slightly above nominal, so the band is conservative rather than over-confident. The interval width barely grows with horizon because the simulator's noise (not forecast uncertainty) dominates. Exchangeability does not strictly hold for time series, which is why the realised test coverage is reported instead of being assumed. Served in `/api/predict` (`predicted_low/high`) and shown as the "80% Range" column in the admin console.
+Coverage is slightly above nominal, so the band is conservative rather than over-confident. The quantile models are deliberately compact (300 trees, depth 8, 25 MB for all six): a first version that reused the deep tuned parameters gave a sharper band (mean width 14 cars) but a 117 MB artefact, over GitHub's 100 MB file limit. Conformal calibration keeps the coverage valid either way; the price of the smaller model is a ~2-4 car wider band. The interval width barely grows with horizon because the simulator's noise (not forecast uncertainty) dominates. Exchangeability does not strictly hold for time series, which is why the realised test coverage is reported instead of being assumed. Served in `/api/predict` (`predicted_low/high`) and shown as the "80% Range" column in the admin console.
 
 ### 7.2 Demand forecasting (days ahead)
 `models/demand.py`: calendar-only XGBoost (zone, time of day, weekday, exam/event flags; no live counts) predicting occupancy as a share of capacity, so it can forecast 1-14 days ahead and answer exam/event what-if questions via `GET /api/demand-forecast`. Test period, versus the zone x weekday x hour mean:

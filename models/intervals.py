@@ -27,8 +27,11 @@ class PredictionIntervals:
         self.q: Dict[str, float] = {}
 
     def _quantile_model(self, alpha: float):
-        p = xgb_params("xgboost_regressor")
-        p.update(objective="reg:quantileerror", quantile_alpha=alpha)
+        # Deliberately compact (not the tuned point-forecast model): the conformal step below
+        # fixes the coverage, so deep trees would only bloat the artefact (>100 MB).
+        p = xgb_params("xgboost_regressor", tuned=False)
+        p.update(objective="reg:quantileerror", quantile_alpha=alpha, n_estimators=300,
+                 max_depth=8, learning_rate=0.05, min_child_weight=5)
         p.pop("eval_metric", None)
         return build_pipeline(xgb.XGBRegressor(**p))
 
