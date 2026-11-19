@@ -97,3 +97,33 @@ python -m models.train                     # fits and saves the deployed pipelin
 python -m experiments.error_analysis       # section 4
 python -m experiments.explain              # section 5
 ```
+
+## 7. Prediction intervals and demand forecasting (Part C)
+
+### 7.1 Prediction intervals (80%, conformalised quantile regression)
+`models/intervals.py`: lower/upper quantile XGBoost fitted on train, widened by a conformal correction computed on the validation period. Coverage on the untouched test period (nominal 80%):
+
+| Horizon | Test coverage | Mean width (cars) |
+|---|---:|---:|
+| +15 min | 0.808 | 14.0 |
+| +30 min | 0.815 | 14.2 |
+| +60 min | 0.826 | 14.9 |
+
+Coverage is slightly above nominal, so the band is conservative rather than over-confident. The interval width barely grows with horizon because the simulator's noise (not forecast uncertainty) dominates. Exchangeability does not strictly hold for time series, which is why the realised test coverage is reported instead of being assumed. Served in `/api/predict` (`predicted_low/high`) and shown as the "80% Range" column in the admin console.
+
+### 7.2 Demand forecasting (days ahead)
+`models/demand.py`: calendar-only XGBoost (zone, time of day, weekday, exam/event flags; no live counts) predicting occupancy as a share of capacity, so it can forecast 1-14 days ahead and answer exam/event what-if questions via `GET /api/demand-forecast`. Test period, versus the zone x weekday x hour mean:
+
+| Model | MAE (% of capacity) | RMSE | Peak hour within ±1 h | Peak-level MAE |
+|---|---:|---:|---:|---:|
+| Seasonal mean | 3.37 | 4.73 | 85.2% | 5.42 |
+| **Calendar XGBoost** | **2.68** | **3.52** | **87.0%** | **4.44** |
+
+The gain is modest (the simulator's demand is itself a fixed profile plus noise) and peak-hour identification is limited because peaks are flat-topped plateaus. The deployed model is refit on train + validation so the campus-event days, which fall in the validation period, are learned; exam and event effects therefore rest on one exam week and two event days and should be treated as indicative only. The what-if exam scenario raises weekday saturation hours for academic lots; the model has never seen real exam-week traffic.
+
+### 7.3 Other Part C modules
+* **Data collection** (`data_collection/`): SQLite store of per-camera counts; zone total = sum over cameras per 5-minute bucket; `POST /api/ingest` (optional `X-API-Key`) also feeds the rolling history so forecasts use real lags; `python -m data_collection.store --out data/processed/lpu_live.csv` exports real observations in the exact training schema.
+* **Zone analysis** (`GET /api/zone-analysis/{zone}`): weekday/weekend profiles, peak hour, typical fill/drain hour, saturation share. Vehicle turnover is intentionally not reported: counts only give net change, and 5-minute counts are noisy, so a churn figure would mostly measure noise.
+* **Heatmaps** (`GET /api/heatmap`): historical zone x hour (weekday/weekend), one zone's weekday x hour, and tomorrow's forecast.
+* **Admin alerts**: zones forecast at ≥ 90%, saturation probability ≥ 0.70, or stale cameras.
+* All historical views are labelled `data_source: simulated` until real observations replace the generator.

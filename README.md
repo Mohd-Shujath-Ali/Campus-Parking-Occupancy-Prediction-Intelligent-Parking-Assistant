@@ -104,6 +104,9 @@ pytest tests/ -v
 - `GET /api/health`: System status, active zones count, forecast horizons.
 - `GET /api/zones`: Full metadata for all 12 LPU parking grounds.
 - `GET /api/explain?zone_id=ZONE_BLOCK1&current_count=80`: SHAP breakdown of a forecast (base value + per-feature effect in cars).
+- `GET /api/demand-forecast?days=7&zone_id=ZONE_MAINPARK_NORTH&exam_dates=2026-11-23`: days-ahead peak time/level per zone with exam/event what-if.
+- `GET /api/zone-analysis/{zone_id}` and `GET /api/heatmap?kind=zone_hour|zone_week|forecast`: usage profiles and heatmap matrices.
+- `POST /api/ingest` and `GET /api/observations/stats`: collect real camera counts (optional `X-API-Key`).
 - `POST /api/predict`: Forecast occupancy for given zone, current count, and horizon (+15, +30, +60 min).
 - `GET /api/recommendations?destination=Block_26_CSE&horizon_minutes=15`: Returns ranked viable parking grounds with walking distance, arrival availability, and smart tips.
 
@@ -136,7 +139,9 @@ Tuned XGBoost: 3.72 / 3.79 MAE at +30 / +60 min (persistence 9.46 / 14.84). Baye
 
 **Serving.** `/api/predict` builds lags from a rolling per-zone history (`models/history.py`) and returns `lag_source` (`observed`, `partial` or `estimated`). Counts in `/api/recommendations` are simulated demo values (`count_source: simulated`) until the camera counter feeds the history buffer.
 
-**Not yet done:** real (logged) occupancy data, uncertainty intervals, demand-forecasting and admin heatmap modules, public deployment, rolling-origin evaluation that holds out an exam week.
+**Also implemented:** 80% conformal prediction intervals (test coverage 0.81-0.83), calendar-based demand forecasting with exam/event what-if (occupancy MAE 2.7% of capacity vs 3.4% seasonal mean), zone-level analysis, heatmaps, admin alerts and a camera-count ingest + export pipeline (see `docs/results.md` section 7).
+
+**Not yet done:** real (logged) occupancy data actually collected, public deployment, rolling-origin evaluation that holds out an exam week, drift monitoring.
 
 ---
 
