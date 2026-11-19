@@ -171,6 +171,8 @@ def test_metrics_endpoint():
 # ─────────────────────────── YOLO Detection ───────────────────
 
 def test_detect_image_endpoint():
+    pytest.importorskip("cv2", reason="server-side detection needs OpenCV")
+    pytest.importorskip("ultralytics", reason="server-side detection needs ultralytics (requirements-full.txt)")
     test_imgs = list(Path("collab_content_backup/LPU---Parking-1/test/images").glob("*.jpg"))
     if not test_imgs:
         pytest.skip("No test images available")
@@ -262,6 +264,7 @@ def test_shap_figure_whitelist_guard():
 
 def test_image_quality_assessment():
     import numpy as np
+    pytest.importorskip("cv2", reason="OpenCV is not installed in the slim runtime")
     from computer_vision.detection import assess_image_quality
 
     # Underexposed (black frame)
@@ -310,3 +313,23 @@ def test_navigate_capacity_cap():
         assert res.status_code in (200, 429)  # 200 within limit, or 429 once rate limit reached
         if res.status_code == 200:
             assert res.json()["active_in_flight_count"] <= 55
+
+
+# ─────────────────────────── Slim deployment (no OpenCV/Ultralytics) ───────────────────
+
+def test_server_side_vision_unavailable_degrades_gracefully(monkeypatch):
+    """On the slim serverless deployment YOLO runs in the browser; server endpoints must say so, not crash."""
+    import api.routes as routes
+    from io import BytesIO
+    monkeypatch.setattr(routes, "_server_vision", lambda: None)
+
+    health = client.get("/api/health")
+    assert health.status_code == 200
+    assert health.json()["yolo_model"]["loaded"] is False
+    assert "browser" in health.json()["yolo_model"]["note"]
+
+    jpg = {"file": ("f.jpg", BytesIO(b"\xff\xd8\xff"), "image/jpeg")}
+    r = client.post("/api/detect-frame", files=jpg)
+    assert r.status_code == 503 and "browser" in r.json()["detail"]
+    r = client.post("/api/detect-image", files={"file": ("f.jpg", BytesIO(b"\xff\xd8\xff"), "image/jpeg")})
+    assert r.status_code == 503

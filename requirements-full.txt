@@ -1,0 +1,27 @@
+# Full development environment: everything in requirements.txt plus the vision, research and
+# notebook tooling. Install with:  pip install -r requirements-full.txt
+-r requirements.txt
+
+# Computer vision + deep learning (server-side YOLO fallback, training notebooks)
+opencv-python-headless>=4.10.0.84
+shapely>=2.0.4
+ultralytics>=8.3.0
+torch>=2.2.0
+
+# Training, experiments and explainability
+statsmodels>=0.14.2
+imbalanced-learn>=0.12.0
+lightgbm>=4.5.0
+optuna>=4.0.0
+shap>=0.46.0
+matplotlib>=3.9.0
+seaborn>=0.13.2
+plotly>=5.24.0
+pyarrow>=17.0.0
+
+# Notebooks, testing, HTTP utilities
+nbclient>=0.10.0
+ipykernel>=6.29.0
+pytest>=8.3.0
+httpx>=0.27.0
+requests>=2.32.0

@@ -18,7 +18,10 @@ import pandas as pd
 
 from utils.config import load_model_config, load_zones_config
 
-DEFAULT_DB = os.environ.get("PARKING_DB", "data/live/observations.db")
+# Serverless hosts (Vercel) have a read-only filesystem except /tmp, which is per-instance and ephemeral:
+# collected counts there are a short-lived buffer, not durable storage. Set PARKING_DB to override.
+_FALLBACK_DB = "/tmp/observations.db" if os.environ.get("VERCEL") else "data/live/observations.db"
+DEFAULT_DB = os.environ.get("PARKING_DB", _FALLBACK_DB)
 CADENCE_MIN = 5
 
 SCHEMA = """

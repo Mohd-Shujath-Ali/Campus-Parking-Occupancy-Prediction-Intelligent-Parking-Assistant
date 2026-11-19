@@ -34,11 +34,11 @@ RUN groupadd -r -g 1000 appgroup && \
     chown -R appuser:appgroup /tmp/torch_inductor /tmp/torch /tmp/Ultralytics /tmp/matplotlib /app
 
 # Copy dependency manifest
-COPY --chown=appuser:appgroup requirements.txt .
+COPY --chown=appuser:appgroup requirements.txt requirements-full.txt ./
 
 # Install CPU PyTorch wheel first to avoid pulling 2.5GB CUDA packages, then install rest
 RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu && \
-    pip install --no-cache-dir -r requirements.txt
+    pip install --no-cache-dir -r requirements-full.txt
 
 # Copy application code, configs, pipelines and assets
 COPY --chown=appuser:appgroup api/ ./api/
@@ -50,6 +50,7 @@ COPY --chown=appuser:appgroup data_pipeline/ ./data_pipeline/
 COPY --chown=appuser:appgroup evaluation/ ./evaluation/
 COPY --chown=appuser:appgroup features/ ./features/
 COPY --chown=appuser:appgroup frontend/ ./frontend/
+COPY --chown=appuser:appgroup public/ ./public/
 COPY --chown=appuser:appgroup models/ ./models/
 COPY --chown=appuser:appgroup recommendation/ ./recommendation/
 COPY --chown=appuser:appgroup utils/ ./utils/

@@ -46,11 +46,26 @@ ranker = ParkingRanker()
 # Health & Status
 # ---------------------------------------------------------------------------
 
+_NO_SERVER_VISION = ("Server-side detection (OpenCV/Ultralytics) is not installed in this deployment. "
+                     "The Vision page runs YOLO in your browser instead.")
+
+
+def _server_vision():
+    """The server-side detection module, or None when OpenCV/Ultralytics are not installed
+    (e.g. the slim serverless deployment, where YOLO runs in the browser)."""
+    try:
+        from computer_vision import detection
+        return detection
+    except ImportError:
+        return None
+
+
 @router.get("/health")
 def get_health():
-    from computer_vision.detection import model_status
     ml_status = models_ready()
-    cv_status = model_status()
+    vision = _server_vision()
+    cv_status = vision.model_status() if vision else {"loaded": False, "server_side": False,
+                                                      "note": _NO_SERVER_VISION}
     return {
         "status": "healthy",
         "service": "LPU Campus Parking Intelligence System",
@@ -620,7 +635,10 @@ async def detect_image(
         except Exception as e:
             logger.warning(f"Failed to parse ROI coordinates: {e}")
 
-    from computer_vision.detection import compare_models_from_bytes, detect_from_bytes
+    vision = _server_vision()
+    if vision is None:
+        raise HTTPException(status_code=503, detail=_NO_SERVER_VISION)
+    compare_models_from_bytes, detect_from_bytes = vision.compare_models_from_bytes, vision.detect_from_bytes
 
     if model_choice == "both":
         comp_res = await run_in_threadpool(compare_models_from_bytes, image_bytes, parsed_roi)
@@ -683,8 +701,10 @@ async def detect_frame(request: Request, file: UploadFile = File(...)):
     if len(image_bytes) > 10 * 1024 * 1024:
         raise HTTPException(status_code=413, detail="Frame too large. Maximum 10 MB.")
 
-    from computer_vision.detection import detect_from_bytes
-    result = await run_in_threadpool(detect_from_bytes, image_bytes, None, "best")
+    vision = _server_vision()
+    if vision is None:
+        raise HTTPException(status_code=503, detail=_NO_SERVER_VISION)
+    result = await run_in_threadpool(vision.detect_from_bytes, image_bytes, None, "best")
 
     total_count = result.get("vehicle_count_total", result.get("vehicle_count", 0))
 

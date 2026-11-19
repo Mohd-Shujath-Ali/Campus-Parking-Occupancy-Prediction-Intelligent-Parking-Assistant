@@ -11,7 +11,7 @@ from jinja2 import Environment, FileSystemLoader
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 TEMPLATES_DIR = PROJECT_ROOT / "frontend" / "templates"
-STATIC_DIR = PROJECT_ROOT / "frontend" / "static"
+STATIC_DIR = PROJECT_ROOT / "public" / "static"
 OUTPUT_DIR = PROJECT_ROOT / "frontend_dist"
 
 PAGES = [

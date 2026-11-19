@@ -39,11 +39,11 @@ RUN groupadd -r -g 1000 appgroup && \
     mkdir -p /tmp/torch_inductor /tmp/torch /tmp/Ultralytics /tmp/matplotlib && \
     chown -R appuser:appgroup /tmp/torch_inductor /tmp/torch /tmp/Ultralytics /tmp/matplotlib /app
 
-COPY --chown=appuser:appgroup requirements.txt .
+COPY --chown=appuser:appgroup requirements.txt requirements-full.txt ./
 
 # Install PyTorch with CUDA 12.1 support
 RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cu121 && \
-    pip install --no-cache-dir -r requirements.txt
+    pip install --no-cache-dir -r requirements-full.txt
 
 # Copy source tree and model weights
 COPY --chown=appuser:appgroup api/ ./api/
@@ -55,6 +55,7 @@ COPY --chown=appuser:appgroup data_pipeline/ ./data_pipeline/
 COPY --chown=appuser:appgroup evaluation/ ./evaluation/
 COPY --chown=appuser:appgroup features/ ./features/
 COPY --chown=appuser:appgroup frontend/ ./frontend/
+COPY --chown=appuser:appgroup public/ ./public/
 COPY --chown=appuser:appgroup models/ ./models/
 COPY --chown=appuser:appgroup recommendation/ ./recommendation/
 COPY --chown=appuser:appgroup utils/ ./utils/

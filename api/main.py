@@ -1,7 +1,7 @@
 import os
 import uvicorn
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.responses import HTMLResponse, FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
@@ -41,8 +41,12 @@ else:
         allow_headers=["*"],
     )
 
-# Mount Static Files (CSS, JS, favicon)
-app.mount("/static", StaticFiles(directory="frontend/static"), name="static")
+# Static files (CSS, JS, favicon, the ONNX YOLO models) live in public/static.
+# Locally FastAPI serves them. On Vercel the platform serves public/ from its CDN (a function response is
+# capped at ~4.5 MB, far below the 24 MB ONNX models), so the mount is skipped there.
+IS_VERCEL = bool(os.environ.get("VERCEL"))
+if not IS_VERCEL:
+    app.mount("/static", StaticFiles(directory="public/static"), name="static")
 
 # Configure Templates (HTML)
 templates = Jinja2Templates(directory="frontend/templates")
@@ -53,7 +57,10 @@ app.include_router(router)
 # Favicon — prevents 404 spam in logs
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon():
-    return FileResponse("frontend/static/favicon.ico")
+    path = "public/static/favicon.ico"
+    if not os.path.exists(path):      # e.g. Vercel: public/ is not part of the function bundle
+        return Response(status_code=204)
+    return FileResponse(path)
 
 # Multi-Page Web Dashboard Routes
 @app.get("/", response_class=HTMLResponse)
