@@ -15,19 +15,6 @@ Behaviour to expect on the free plan: the service sleeps after ~15 minutes idle 
 takes ~30-60 s), memory is ~400 MB of 512 MB, and the instance disk is ephemeral (collected observations
 are lost on redeploy).
 
-## Option A2: Hugging Face Spaces (free, no credit card, 16 GB RAM)
-Use this if Render asks for a card.
-1. On huggingface.co: **New Space** → SDK **Docker** (Blank template) → hardware **CPU basic (free)** → **Public**.
-2. In the Space's **Files** tab: **Add file → Upload files**, upload `deploy/huggingface/Dockerfile` and
-   `deploy/huggingface/README.md` from this repository (replace the default README).
-3. The Space builds automatically (a few minutes) and then shows the app at
-   `https://<your-username>-<space-name>.hf.space`.
-
-The Dockerfile clones the `testing` branch from GitHub at build time (change `GIT_REF` to deploy another branch).
-After pushing new commits, use the Space's **Settings → Factory rebuild** to pick them up. If the GitHub repository
-is private, add a Space secret named `GITHUB_TOKEN` (fine-grained token with read access to the repository).
-Free Spaces sleep after ~48 hours without traffic and restart on the next visit; the disk is ephemeral.
-
 ## Option B: Docker (any host)
 ```bash
 docker compose up --build -d        # CPU image, serves on http://localhost:8000
