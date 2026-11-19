@@ -38,6 +38,8 @@ def zone_analysis(zone_id: str) -> Dict:
     z = h[h.zone_id == zone_id]
     if z.empty:
         raise KeyError(zone_id)
+    # NOTE: vehicle turnover is deliberately not reported. Counts only give net change per
+    # interval (and 5-minute counts are noisy), so a churn figure would mostly measure noise.
     wd, we = z[~z.weekend], z[z.weekend]
     prof_wd = pd.Series(_hourly(wd))
     peak_h = int(prof_wd.idxmax())
@@ -55,11 +57,6 @@ def zone_analysis(zone_id: str) -> Dict:
     fills = [a for a, _ in per_day if a is not None]
     drains = [b for _, b in per_day if b is not None]
 
-    # churn proxy: mean absolute 5-minute change in vehicles, scaled to cars/hour, in the peak hour
-    z = z.sort_values("timestamp")
-    d_abs = z.vehicle_count.diff().abs()
-    churn = d_abs[(z.hour == peak_h) & (~z.weekend)].mean() * 12
-
     return {
         "zone_id": zone_id,
         "capacity": int(z.operational_capacity.iloc[0]),
@@ -73,7 +70,6 @@ def zone_analysis(zone_id: str) -> Dict:
         "weekday_peak_occupancy": round(float(prof_wd.max()), 3),
         "typical_fill_hour": int(np.median(fills)) if fills else None,   # first >=75%
         "typical_drain_hour": int(np.median(drains)) if drains else None,  # back under 50%
-        "peak_churn_cars_per_hour": round(float(churn), 1),               # net-change proxy for turnover
         "weekend_to_weekday_ratio": round(float(we.occ.mean() / max(wd.occ.mean(), 1e-9)), 2),
     }
 
