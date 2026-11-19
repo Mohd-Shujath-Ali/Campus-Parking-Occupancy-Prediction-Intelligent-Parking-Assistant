@@ -77,8 +77,9 @@ Extended comparison (LightGBM, a chronological blend stack, default-vs-tuned XGB
 git clone https://github.com/Mohd-Shujath-Ali/Campus-Parking-Occupancy-Prediction-Intelligent-Parking-Assistant.git
 cd Campus-Parking-Occupancy-Prediction-Intelligent-Parking-Assistant
 
-# Install pinned dependencies
-pip install -r requirements.txt
+# Install dependencies
+pip install -r requirements-full.txt   # development: training, experiments, notebooks, tests, server-side YOLO
+# pip install -r requirements.txt       # lean runtime only (API, dashboards, forecasts): what Vercel/Render install
 ```
 
 ### 1. Run End-to-End Training & Diagnostics
@@ -113,7 +114,7 @@ python -m uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
 - **Interactive REST Swagger**: `http://localhost:8000/docs`.
 
 ### 5. Deploy
-See [`docs/deployment.md`](docs/deployment.md): a Render blueprint (`render.yaml`, deploys the `testing` branch from the lean `requirements-render.txt`) or Docker.
+See [`docs/deployment.md`](docs/deployment.md): **Vercel** (`pyproject.toml`, `vercel.json`, static assets in `public/`), a Render blueprint (`render.yaml`) or Docker. YOLO runs in the browser, so the hosted build needs no vision libraries.
 
 ### 6. Run Test Suite
 ```bash
