@@ -1,0 +1,73 @@
+{
+  "version": "20261119-1652-afe1c0b7",
+  "trained_at": "2026-11-19T16:52:13+00:00",
+  "data_source": "synthetic",
+  "data_from": "2026-08-03 00:00:00",
+  "data_to": "2026-12-06 23:55:00",
+  "rows": 435456,
+  "zones": 12,
+  "features": 41,
+  "horizons_min": [
+    15,
+    30,
+    60
+  ],
+  "intervals": "residual_distribution",
+  "metrics_test": {
+    "H15": {
+      "MAE": 3.485,
+      "RMSE": 5.19,
+      "persistence_MAE": 5.555,
+      "skill_vs_persistence_pct": 37.3,
+      "interval_coverage": 0.798,
+      "interval_target": 0.8,
+      "interval_coverage_events": 0.818,
+      "interval_mean_width": 10.18,
+      "free_slot_brier": 0.0116,
+      "free_slot_brier_climatology": 0.0562,
+      "free_slot_base_rate": 0.94
+    },
+    "H30": {
+      "MAE": 4.151,
+      "RMSE": 6.181,
+      "persistence_MAE": 8.912,
+      "skill_vs_persistence_pct": 53.4,
+      "interval_coverage": 0.793,
+      "interval_target": 0.8,
+      "interval_coverage_events": 0.815,
+      "interval_mean_width": 11.96,
+      "free_slot_brier": 0.014,
+      "free_slot_brier_climatology": 0.0562,
+      "free_slot_base_rate": 0.94
+    },
+    "H60": {
+      "MAE": 4.776,
+      "RMSE": 6.926,
+      "persistence_MAE": 14.683,
+      "skill_vs_persistence_pct": 67.5,
+      "interval_coverage": 0.801,
+      "interval_target": 0.8,
+      "interval_coverage_events": 0.893,
+      "interval_mean_width": 14.23,
+      "free_slot_brier": 0.0159,
+      "free_slot_brier_climatology": 0.0563,
+      "free_slot_base_rate": 0.94
+    },
+    "saturation_pr_auc": 0.9725,
+    "calendar_model": {
+      "MAE": 7.246,
+      "interval_coverage": 0.785,
+      "interval_coverage_events": 0.868,
+      "free_slot_brier": 0.0248,
+      "free_slot_brier_climatology": 0.0561
+    }
+  },
+  "libraries": {
+    "python": "3.13.5",
+    "xgboost": "3.4.1",
+    "scikit_learn": "1.9.1",
+    "pandas": "3.0.5",
+    "numpy": "2.5.3"
+  },
+  "notes": "Trained on the synthetic generator (data_pipeline/generator.py); retrain on real observations with python -m models.retrain once cameras have collected enough data."
+}

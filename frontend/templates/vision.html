@@ -28,6 +28,29 @@
         </div>
     </div>
 
+    {% if user and 'camera_control' in perms %}
+    <!-- Camera Control (admin only) -->
+    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div class="px-5 py-4 border-b border-slate-100 flex flex-col sm:flex-row justify-between sm:items-center gap-2">
+            <div>
+                <h4 class="font-bold text-slate-900 text-sm flex items-center space-x-2"><i class="fa-solid fa-sliders text-orange-600"></i><span>Camera Control</span></h4>
+                <p class="text-xs text-slate-500">Choose each ground camera's video source and enable or disable it. ROI polygons are drawn below and saved per camera with version history.</p>
+            </div>
+            <span class="text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-full bg-slate-900 text-white self-start sm:self-auto">Admin only</span>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="w-full text-left text-xs">
+                <thead class="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold uppercase tracking-wider">
+                    <tr><th class="px-4 py-3">Camera</th><th class="px-4 py-3">Ground</th><th class="px-4 py-3">Source</th><th class="px-4 py-3 min-w-[14rem]">Stream URL / file</th><th class="px-4 py-3">Enabled</th><th class="px-4 py-3">Active ROI</th><th class="px-4 py-3"></th></tr>
+                </thead>
+                <tbody id="cameraAdminBody" class="divide-y divide-slate-100 text-slate-700">
+                    <tr><td colspan="7" class="px-4 py-6 text-center text-slate-400">Loading cameras…</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+
     <!-- Vision Workbench Grid -->
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
@@ -105,6 +128,18 @@
                 </button>
                 <span id="roiPointsIndicator" class="ml-auto text-[11px] text-slate-500 font-mono">No ROI (Full Lot)</span>
             </div>
+
+            {% if user and 'camera_control' in perms %}
+            <!-- Bind the ROI to a ground camera -->
+            <div class="flex flex-wrap items-center gap-1.5 p-2 bg-orange-50/60 rounded-xl border border-orange-200 text-xs">
+                <span class="font-bold text-slate-600 text-[11px] mr-1">Camera:</span>
+                <select id="roiCameraSelect" class="bg-white border border-slate-300 rounded-lg px-2 py-1 text-xs font-semibold focus:outline-none focus:ring-1 focus:ring-orange-500" aria-label="Camera for this ROI"></select>
+                <button type="button" onclick="saveRoiToCamera()" class="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-orange-600 text-white font-semibold shadow-sm flex items-center space-x-1"><i class="fa-solid fa-floppy-disk text-xs"></i><span>Save ROI</span></button>
+                <button type="button" onclick="loadCameraRoi()" class="px-2.5 py-1 rounded-lg bg-white hover:bg-orange-50 font-semibold border border-slate-200 shadow-sm flex items-center space-x-1"><i class="fa-solid fa-download text-xs"></i><span>Load active</span></button>
+                <select id="roiHistorySelect" class="bg-white border border-slate-300 rounded-lg px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-orange-500" aria-label="ROI version history"><option value="">History…</option></select>
+                <button type="button" onclick="publishCount()" class="ml-auto px-2.5 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold shadow-sm flex items-center space-x-1" title="Send the last detected ROI count to this camera's ground"><i class="fa-solid fa-satellite-dish text-xs"></i><span>Publish count</span></button>
+            </div>
+            {% endif %}
 
             <!-- File Upload & Model Toggle Row -->
             <div class="flex flex-col sm:flex-row gap-2">
@@ -228,4 +263,5 @@
 <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.20.1/dist/ort.all.min.js"></script>
 <script src="/static/js/client_yolo.js"></script>
 <script src="/static/js/vision.js"></script>
+{% if user and 'camera_control' in perms %}<script src="/static/js/cameras.js"></script>{% endif %}
 {% endblock %}

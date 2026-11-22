@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+
+{% block title %}Model Health — LPU Smart Parking{% endblock %}
+
+{% block content %}
+<section class="space-y-6">
+    <div class="flex flex-col sm:flex-row justify-between sm:items-center gap-3 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+        <div>
+            <h2 class="text-xl font-black text-slate-900 flex items-center space-x-2">
+                <i class="fa-solid fa-heart-pulse text-orange-600"></i><span>Model Health</span>
+            </h2>
+            <p class="text-xs text-slate-500 mt-0.5 max-w-3xl">What the forecaster was trained on, where each ground's count comes from right now, and how its forecasts are holding up against what cameras actually saw.</p>
+        </div>
+        <button onclick="loadModel()" class="bg-orange-600 hover:bg-orange-700 text-white px-3.5 py-1.5 rounded-xl text-xs font-bold shadow-sm flex items-center space-x-1.5 self-start sm:self-auto">
+            <i class="fa-solid fa-rotate-right text-xs"></i><span>Refresh</span>
+        </button>
+    </div>
+
+    <div id="syntheticBanner" class="hidden text-sm rounded-xl px-4 py-3 border bg-amber-50 border-amber-200 text-amber-900 flex items-start space-x-2.5" role="status">
+        <i class="fa-solid fa-flask mt-0.5"></i>
+        <p><b>Trained on synthetic data.</b> The model learned the data generator's patterns, not LPU's real traffic, so the accuracy below is a pipeline check, not a promise. Real accuracy shows up under <i>Live accuracy</i> once cameras report. Retrain on collected counts with <code class="font-mono bg-amber-100 px-1 rounded">python -m models.retrain</code>.</p>
+    </div>
+
+    <!-- Version cards -->
+    <div id="metaCards" class="grid grid-cols-2 md:grid-cols-4 gap-4"></div>
+
+    <!-- Data sources -->
+    <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div class="px-5 py-4 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+                <h3 class="font-bold text-slate-900 text-sm">Where each ground's count comes from</h3>
+                <p class="text-xs text-slate-500">Camera = a recent ingested count. Demo = simulated (only while no camera has ever reported). Estimate = normal-day pattern, used when a ground has no usable reading.</p>
+            </div>
+            <span id="modeChip" class="text-xs font-bold px-3 py-1 rounded-full border self-start"></span>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="w-full text-left text-xs">
+                <thead class="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold uppercase tracking-wider">
+                    <tr><th class="px-4 py-3">Ground</th><th class="px-4 py-3">Source</th><th class="px-4 py-3">Status</th><th class="px-4 py-3">Reading age</th><th class="px-4 py-3">Count now</th><th class="px-4 py-3">Forecast confidence</th></tr>
+                </thead>
+                <tbody id="sourcesBody" class="divide-y divide-slate-100 text-slate-700"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Live accuracy -->
+    <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
+            <div>
+                <h3 class="font-bold text-slate-900 text-sm">Live accuracy <span class="font-normal text-slate-400">(forecasts scored against real counts)</span></h3>
+                <p id="liveWindow" class="text-xs text-slate-500"></p>
+            </div>
+            <span id="driftChip" class="text-xs font-bold px-3 py-1 rounded-full border self-start"></span>
+        </div>
+        <p id="driftDetail" class="text-xs text-slate-600"></p>
+        <div class="overflow-x-auto">
+            <table class="w-full text-left text-xs">
+                <thead class="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold uppercase tracking-wider">
+                    <tr><th class="px-4 py-3">Horizon</th><th class="px-4 py-3">Scored</th><th class="px-4 py-3">Live error (vehicles)</th><th class="px-4 py-3">Training error</th><th class="px-4 py-3">Live ÷ training</th><th class="px-4 py-3">Bias</th><th class="px-4 py-3">80% range hit rate</th><th class="px-4 py-3">Free-slot Brier</th></tr>
+                </thead>
+                <tbody id="liveBody" class="divide-y divide-slate-100 text-slate-700"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Holdout accuracy -->
+    <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+        <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+            <div class="px-5 py-4 border-b border-slate-100">
+                <h3 class="font-bold text-slate-900 text-sm">Holdout accuracy at training time</h3>
+                <p class="text-xs text-slate-500">Measured on a period the model never saw. Skill = how much smaller the error is than assuming "same as now".</p>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left text-xs">
+                    <thead class="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold uppercase tracking-wider">
+                        <tr><th class="px-4 py-3">Horizon</th><th class="px-4 py-3">Error</th><th class="px-4 py-3">"Same as now"</th><th class="px-4 py-3">Skill</th><th class="px-4 py-3">80% range hit</th><th class="px-4 py-3">Free-slot Brier</th></tr>
+                    </thead>
+                    <tbody id="holdoutBody" class="divide-y divide-slate-100 text-slate-700"></tbody>
+                </table>
+            </div>
+        </div>
+        <div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+            <div class="px-5 py-4 border-b border-slate-100">
+                <h3 class="font-bold text-slate-900 text-sm">Where it is weakest (+60 min)</h3>
+                <p class="text-xs text-slate-500">Error by kind of day. Events are hardest because each one turns out differently from its estimate.</p>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-left text-xs">
+                    <thead class="bg-slate-50 border-b border-slate-200 text-slate-500 font-bold uppercase tracking-wider">
+                        <tr><th class="px-4 py-3">Kind of day</th><th class="px-4 py-3">Rows</th><th class="px-4 py-3">Error</th><th class="px-4 py-3">"Same as now"</th><th class="px-4 py-3">Skill</th></tr>
+                    </thead>
+                    <tbody id="regimeBody" class="divide-y divide-slate-100 text-slate-700"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</section>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="/static/js/model.js"></script>
+{% endblock %}

@@ -71,11 +71,27 @@ artifacts:
   metrics_csv: "artifacts/model_comparison.csv"
 
 recommendation:
-  availability_weight: 0.50
-  distance_weight: 0.35
+  # availability / distance / blend were tuned on the validation replay (see experiments/replay_recommendations.py)
+  availability_weight: 0.25
+  distance_weight: 0.70
   freshness_penalty_weight: 0.15
   saturation_hard_exclude_threshold: 0.70   # P(sat) above this → zone excluded
   anti_herding_score_delta_threshold: 0.10  # score gap below this → softmax dispatch
   anti_herding_beta: 0.05                   # softmax temperature
-  camera_stale_seconds: 300                 # 5 min — beyond this, staleness penalty applies
-  camera_offline_seconds: 1800              # 30 min — beyond this, fallback to historical mean
+  camera_stale_seconds: 420                 # a reading older than this (just over one 5-minute bucket) is stale; staleness penalty applies
+  camera_offline_seconds: 1800              # 30 min: beyond this the live count is dropped and the normal-day profile is used
+  p_free_blend: 1.0                         # availability score = P(free slot on arrival). 0 = raw occupancy only. Chosen on the validation replay (experiments/replay_recommendations.py --tune)
+  min_p_free_warning: 0.35                  # below this a ground is flagged as unlikely to have space on arrival
+
+uncertainty:
+  free_slots_min_abs: 2                     # a ground "has space" when at least max(2, 3% of capacity) slots are free
+  free_slots_min_frac: 0.03
+  interval_coverage: 0.80
+
+live:
+  fresh_seconds: 420                        # reading this recent = live camera
+  stale_seconds: 1800                       # older than fresh but newer than this = stale (forecast still uses it, lower confidence)
+  log_predictions: true                     # record live forecasts so accuracy can be measured when the real count arrives
+  drift_mae_ratio: 1.5                      # live MAE this many times the backtest MAE = drift warning
+  far_decay_minutes: 180                    # beyond +60 min the live deviation fades into the calendar model with this time constant (chosen on validation: experiments/far_horizon.py)
+  max_arrival_days: 7                       # furthest arrival time a driver can pick

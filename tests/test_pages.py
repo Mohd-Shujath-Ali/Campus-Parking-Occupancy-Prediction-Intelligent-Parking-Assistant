@@ -2,15 +2,21 @@ import pytest
 from fastapi.testclient import TestClient
 
 from api.main import app
+from tests.auth_helpers import login_client
 
-c = TestClient(app)
+c = login_client()
 
 
-@pytest.mark.parametrize("path", ["/", "/admin", "/vision", "/analytics", "/zones"])
+@pytest.mark.parametrize("path", ["/", "/admin", "/vision", "/analytics", "/zones", "/users", "/account"])
 def test_html_pages_render(path):
     """Regression: the pre-0.29 TemplateResponse(name, {'request': ...}) call 500s on current Starlette."""
     r = c.get(path)
     assert r.status_code == 200 and "<html" in r.text.lower()
+
+
+def test_login_page_is_public():
+    r = TestClient(app).get("/login")
+    assert r.status_code == 200 and 'id="loginForm"' in r.text
 
 
 def test_new_dashboard_sections_present():

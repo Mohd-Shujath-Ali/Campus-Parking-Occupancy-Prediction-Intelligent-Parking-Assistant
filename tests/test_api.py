@@ -6,8 +6,9 @@ import pytest
 from pathlib import Path
 from fastapi.testclient import TestClient
 from api.main import app
+from tests.auth_helpers import login_client
 
-client = TestClient(app)
+client = login_client()   # admin: these tests cover every endpoint
 
 
 # ─────────────────────────── Health ───────────────────────────
@@ -81,12 +82,20 @@ def test_prediction_invalid_zone():
 
 
 def test_prediction_invalid_horizon():
-    res = client.post("/api/predict", json={
-        "zone_id": "ZONE_BLOCK1",
-        "horizon_minutes": 45,   # only 15/30/60 allowed
-        "current_count": 50
-    })
-    assert res.status_code == 422
+    for bad in (4, 0, 61, 90):    # supported range is 5-60 minutes
+        res = client.post("/api/predict", json={"zone_id": "ZONE_BLOCK1", "horizon_minutes": bad, "current_count": 50})
+        assert res.status_code == 422, bad
+
+
+def test_prediction_arbitrary_horizon_is_interpolated():
+    """45 min is between the trained +30 and +60 models; the result must lie sensibly between them."""
+    got = {}
+    for h in (30, 45, 60):
+        r = client.post("/api/predict", json={"zone_id": "ZONE_MAINPARK_NORTH", "horizon_minutes": h, "current_count": 200,
+                                              "timestamp": "2026-11-17T09:00:00"})
+        assert r.status_code == 200, r.text
+        got[h] = r.json()["predicted_vehicle_count"]
+    assert min(got[30], got[60]) - 1 <= got[45] <= max(got[30], got[60]) + 1
 
 
 def test_prediction_negative_count():

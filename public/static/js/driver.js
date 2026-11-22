@@ -5,21 +5,151 @@ let currentHorizon = 15;
 function statusColor(status) {
     if (status === 'AVAILABLE')    return { badge: 'bg-emerald-50 text-emerald-700 border-emerald-200', dot: 'bg-emerald-500' };
     if (status === 'FILLING_FAST') return { badge: 'bg-amber-50   text-amber-700   border-amber-200',   dot: 'bg-amber-500'   };
+    if (status === 'CLOSED')       return { badge: 'bg-slate-200  text-slate-700   border-slate-300',   dot: 'bg-slate-500'   };
     return                                { badge: 'bg-rose-50    text-rose-700    border-rose-200',    dot: 'bg-rose-500'    };
 }
 
 function statusLabel(status) {
-    return status === 'AVAILABLE' ? 'Available' : status === 'FILLING_FAST' ? 'Filling Fast' : 'Saturated';
+    return { AVAILABLE: 'Available', FILLING_FAST: 'Filling Fast', SATURATED: 'Saturated',
+             CLOSED: 'Closed', FULL: 'Full (warden)' }[status] || status;
+}
+
+const isBlocked = z => z.status === 'CLOSED' || z.status === 'FULL';
+const escH = s => (window.escapeHtml ? window.escapeHtml(s) : String(s));
+
+// ─────────────────────────── Destinations (campus blocks) ──
+let BLOCK_INDEX = {};
+
+async function loadDestinations() {
+    const sel = document.getElementById('destinationSelect');
+    if (!sel || !window.CURRENT_USER) return;
+    try {
+        const res = await fetch(window.apiUrl ? window.apiUrl('/api/blocks') : '/api/blocks');
+        if (!res.ok) return;
+        const blocks = await res.json();
+        BLOCK_INDEX = Object.fromEntries(blocks.map(b => [b.id, b]));
+        const me = window.CURRENT_USER;
+        const home = me.home_block ? BLOCK_INDEX[me.home_block] : null;
+        const groups = {};
+        blocks.forEach(b => (groups[b.group] = groups[b.group] || []).push(b));
+        sel.innerHTML = (home ? `<option value="">My home block: ${escH(home.name)}</option>` : '') +
+            Object.keys(groups).sort().map(g =>
+                `<optgroup label="${escH(g)}">${groups[g].map(b => `<option value="${escH(b.id)}">${escH(b.name)}</option>`).join('')}</optgroup>`
+            ).join('');
+        if (!home) sel.value = 'Block_26_CSE';
+    } catch (e) { /* keep the server-rendered default option */ }
+}
+
+function etaText(mins) {
+    return mins <= 5 ? 'Now' : mins < 60 ? `${mins} min` : mins % 60 === 0 ? `${mins / 60} h` : `${Math.floor(mins / 60)} h ${mins % 60} min`;
+}
+
+// Either a relative arrival (currentHorizon minutes from now) or a clock time (arriveAt 'HH:MM', next occurrence).
+let arriveAt = null;
+
+function syncHorizonControls() {
+    document.querySelectorAll('.horizon-btn:not(.clock-btn)').forEach(btn => {
+        btn.classList.toggle('active-horizon', !arriveAt && parseInt(btn.getAttribute('data-h')) === currentHorizon);
+    });
+    document.querySelectorAll('.clock-btn').forEach(btn => {
+        btn.classList.toggle('active-horizon', btn.getAttribute('data-t') === arriveAt);
+    });
+    const slider = document.getElementById('etaSlider');
+    if (slider) {
+        slider.value = Math.min(currentHorizon, 120);
+        slider.classList.toggle('opacity-40', !!arriveAt);
+    }
+    const label = document.getElementById('etaLabel');
+    if (label) label.textContent = arriveAt ? clockText(arriveAt) : etaText(currentHorizon);
+}
+
+function clockText(hhmm) {
+    const [h, m] = hhmm.split(':').map(Number);
+    return `${h % 12 || 12}${m ? ':' + String(m).padStart(2, '0') : ''} ${h < 12 ? 'AM' : 'PM'}`;
 }
 
 function setHorizon(mins) {
     currentHorizon = mins;
-    document.querySelectorAll('.horizon-btn').forEach(btn => {
-        const h = parseInt(btn.getAttribute('data-h'));
-        btn.classList.toggle('active-horizon', h === mins);
-    });
+    arriveAt = null;
+    syncHorizonControls();
     fetchRecommendations();
 }
+
+function setArrivalTime(hhmm) {
+    arriveAt = arriveAt === hhmm ? null : hhmm;      // click again to go back to "in N minutes"
+    syncHorizonControls();
+    fetchRecommendations();
+}
+
+// The server resolves the arrival time in campus time and returns it; show exactly what the forecast is for.
+function renderArrival(data) {
+    const el = document.getElementById('arrivalLabel');
+    if (!el || !data.arrival_time) return;
+    const [d, t] = data.arrival_time.split('T');
+    const when = new Date(`${d}T00:00:00`);
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const days = Math.round((when - today) / 86400000);
+    const day = days === 0 ? 'Today' : days === 1 ? 'Tomorrow' : when.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'short' });
+    const basis = { live: 'from live counts', blended: 'live counts blended with the usual pattern', calendar: 'from the campus calendar and usual pattern' }[data.forecast_basis] || '';
+    el.textContent = `Forecast for ${day}, ${clockText(t)} (in ${etaText(data.horizon_minutes)})${basis ? ' · ' + basis : ''}`;
+}
+
+let etaTimer = null;
+function onEtaInput(e) {
+    arriveAt = null;
+    currentHorizon = parseInt(e.target.value, 10);
+    syncHorizonControls();
+    clearTimeout(etaTimer);
+    etaTimer = setTimeout(fetchRecommendations, 250);   // wait for the slider to settle
+}
+
+// ─────────────────────────── Campus conditions (from the calendar) and data source ──
+function condChip(text, tone) {
+    const tones = { amber: 'bg-amber-50 text-amber-800 border-amber-200', sky: 'bg-sky-50 text-sky-800 border-sky-200',
+                    violet: 'bg-violet-50 text-violet-800 border-violet-200', slate: 'bg-white text-slate-600 border-slate-200' };
+    return `<span class="px-2 py-1 rounded-lg border ${tones[tone] || tones.slate}">${escH(text)}</span>`;
+}
+
+function renderConditions(c) {
+    const box = document.getElementById('conditionsBox');
+    if (!box || !c) return;
+    const chips = [];
+    if (c.holiday) chips.push(condChip(`Holiday${c.holiday_names?.length ? ': ' + c.holiday_names[0] : ''}`, 'violet'));
+    else if (c.weekend) chips.push(condChip('Weekend', 'slate'));
+    if (c.exam_day) chips.push(condChip(`Exam day${c.exam_names?.length ? ': ' + c.exam_names[0] : ''}`, 'amber'));
+    if (c.bell_window) chips.push(condChip('Lecture bell window', 'amber'));
+    (c.events_now || []).forEach(e => chips.push(condChip(`Event: ${e.name}`, 'sky')));
+    (c.events_soon || []).forEach(e => chips.push(condChip(`Soon: ${e.name}`, 'sky')));
+    box.innerHTML = chips.length ? chips.join('') : condChip('Normal day', 'slate');
+}
+
+function renderDataMode(mode) {
+    const banner = document.getElementById('dataModeBanner');
+    const dot = document.getElementById('heroDot');
+    const txt = document.getElementById('heroStatusText');
+    const msgs = {
+        demo:      ['bg-amber-50 border-amber-200 text-amber-900', 'fa-flask', 'Demo data: no camera has reported yet, so the counts below are simulated and forecast from a model trained on synthetic data. Treat them as an illustration, not real availability.'],
+        estimated: ['bg-slate-50 border-slate-300 text-slate-700', 'fa-chart-simple', 'No live camera counts right now. Showing the normal pattern for this time of day; actual availability may differ.'],
+        offline:   ['bg-rose-50 border-rose-200 text-rose-800', 'fa-plug-circle-xmark', 'Cannot reach the server. Showing a rough in-browser estimate only.'],
+    };
+    if (dot && txt) {
+        dot.className = 'w-2.5 h-2.5 rounded-full ' + ({ live: 'bg-emerald-400 animate-pulse', demo: 'bg-amber-300', estimated: 'bg-slate-300', offline: 'bg-rose-400' }[mode] || 'bg-slate-300');
+        txt.textContent = { live: '12 grounds · live camera counts', demo: '12 grounds · demo data', estimated: '12 grounds · estimates', offline: 'Server unreachable' }[mode] || '12 grounds';
+    }
+    if (!banner) return;
+    const m = msgs[mode];
+    if (!m) { banner.classList.add('hidden'); return; }
+    banner.className = `text-sm rounded-xl px-4 py-3 border flex items-start space-x-2.5 ${m[0]}`;
+    document.getElementById('dataModeIcon').className = `fa-solid ${m[1]} mt-0.5`;
+    document.getElementById('dataModeText').textContent = m[2];
+}
+
+const SOURCE_BADGE = {
+    camera:    null,
+    simulated: ['bg-amber-50 text-amber-700 border-amber-200', 'Demo'],
+    profile:   ['bg-slate-100 text-slate-600 border-slate-300', 'Estimate'],
+};
+const CONF_LABEL = { high: 'High confidence', medium: 'Medium confidence', low: 'Low confidence' };
 
 // ─────────────────────────── Campus Topology & Client Fallback Engine ──
 const CAMPUS_ZONES = [
@@ -98,37 +228,53 @@ function computeClientSideRecommendations(destination, horizonMinutes, isTrans, 
     };
 }
 
-async function fetchRecommendations() {
-    const dest = document.getElementById('destinationSelect')?.value || 'Block_26_CSE';
-    const isTrans = document.getElementById('chkClassTransition')?.checked || false;
-    const isExam  = document.getElementById('chkExamDay')?.checked || false;
-
+async function fetchRecommendations(silent) {
+    silent = silent === true;      // background refresh: no spinner, so the list does not flicker
+    // Empty value = "my home block": the server resolves it from the signed-in profile.
+    const selected = document.getElementById('destinationSelect')?.value ?? 'Block_26_CSE';
+    const me = window.CURRENT_USER;
+    const homeId = !selected && me ? me.home_block : null;
+    const label = selected ? (BLOCK_INDEX[selected]?.name || selected) : (BLOCK_INDEX[homeId]?.name || 'your home block');
     const list = document.getElementById('recommendationsList');
-    if (list) {
+    if (list && !silent) {
         list.innerHTML = `
             <div class="p-10 text-center text-slate-400 bg-white rounded-2xl border border-slate-100">
                 <i class="fa-solid fa-spinner fa-spin text-2xl mb-2 text-orange-600"></i>
-                <p class="text-sm">Calculating real-time recommendations for ${dest} (+${currentHorizon}m)…</p>
+                <p class="text-sm">Finding the nearest grounds to ${escH(label)} (+${currentHorizon}m)…</p>
             </div>`;
     }
 
+    let res;
     try {
-        const params = new URLSearchParams({
-            destination: dest,
-            horizon_minutes: currentHorizon,
-            is_class_transition: isTrans,
-            is_exam_day: isExam
-        });
+        // Exam days, holidays, events and bell windows come from the campus calendar on the server.
+        const params = new URLSearchParams({ horizon_minutes: Math.min(currentHorizon, 120) });
+        if (arriveAt) params.set('arrive_at', arriveAt);
+        if (selected) params.set('destination', selected);
         const url = (window.apiUrl ? window.apiUrl('/api/recommendations') : '/api/recommendations') + `?${params}`;
-        const res = await fetch(url);
-        if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
-        const data = await res.json();
-        renderRecommendations(data);
+        res = await fetch(url);
     } catch (err) {
-        console.warn('Backend API connecting or unreachable. Running in-browser client ranking engine:', err);
-        const fallbackData = computeClientSideRecommendations(dest, currentHorizon, isTrans, isExam);
-        renderRecommendations(fallbackData);
+        res = null;   // network failure: fall through to the in-browser engine
     }
+
+    if (res && res.status >= 400 && res.status < 500) {
+        // A real answer from the server (not signed in, no home block, unknown block…): show it.
+        const body = await res.json().catch(() => ({}));
+        if (list && res.status !== 401) {
+            list.innerHTML = `<div class="p-8 text-center bg-white rounded-2xl border border-amber-200 text-amber-800 text-sm">
+                <i class="fa-solid fa-circle-info text-xl mb-2 text-amber-500"></i>
+                <p>${escH(typeof body.detail === 'string' ? body.detail : 'Could not get recommendations.')}</p></div>`;
+        }
+        return;
+    }
+    if (res && res.ok) {
+        renderRecommendations(await res.json());
+        return;
+    }
+    console.warn('Backend API unreachable or failing. Running in-browser client ranking engine.');
+    const anchor = selected ? (BLOCK_INDEX[selected]?.anchor || selected) : (BLOCK_INDEX[homeId]?.anchor || 'Block_26_CSE');
+    const fallback = computeClientSideRecommendations(anchor, currentHorizon, false, false);
+    fallback.data_mode = 'offline';
+    renderRecommendations(fallback);
 }
 
 function renderRecommendations(data) {
@@ -138,8 +284,19 @@ function renderRecommendations(data) {
     const meta   = document.getElementById('resultMeta');
 
     if (meta) {
-        const engineLabel = data.is_client_fallback ? '⚡ Client Hardware Engine' : '🌐 Server XGBoost Online';
-        meta.textContent = `${data.recommended_zones.length} grounds evaluated · +${data.horizon_minutes}m forecast · ${engineLabel}`;
+        const engineLabel = data.is_client_fallback ? 'rough in-browser estimate' : 'server forecast';
+        meta.textContent = `${data.recommended_zones.length} grounds · arriving in ${etaText(data.horizon_minutes)} · ${engineLabel}`;
+    }
+    renderDataMode(data.data_mode);
+    renderConditions(data.conditions);
+    renderArrival(data);
+
+    const chip = document.getElementById('homeBlockChip');
+    const chipTxt = document.getElementById('homeBlockChipText');
+    if (chip && chipTxt && data.requested_block_name) {
+        const via = data.uses_adjacent_block ? ` · distances from adjacent ${data.destination.replace(/_/g, ' ')}` : '';
+        chipTxt.textContent = `${data.destination_source === 'home_block' ? 'Your block' : 'Heading to'}: ${data.requested_block_name}${via}`;
+        chip.classList.remove('hidden');
     }
 
     if (tipBox && tipTxt) {
@@ -161,8 +318,27 @@ function renderRecommendations(data) {
     list.innerHTML = data.recommended_zones.map((z, idx) => {
         const sc = statusColor(z.status);
         const occPct = Math.round(z.occupancy_rate * 100);
-        const isBest = idx === 0;
-        const satRiskPct = Math.round((z.saturation_probability || 0) * 100);
+        const blocked = isBlocked(z);
+        const isBest = idx === 0 && !blocked;
+        const pFreePct = z.p_free == null ? null : Math.round(z.p_free * 100);
+
+        if (blocked) {
+            return `
+        <div class="bg-slate-50 rounded-2xl border border-slate-200 p-4 opacity-80">
+            <div class="flex flex-col sm:flex-row justify-between sm:items-center gap-2">
+                <div class="flex items-start space-x-3">
+                    <span class="w-7 h-7 rounded-full bg-slate-200 text-slate-500 text-xs flex items-center justify-center shrink-0"><i class="fa-solid fa-ban"></i></span>
+                    <div>
+                        <h4 class="font-bold text-slate-600 text-sm">${escH(z.name)}</h4>
+                        <p class="text-xs text-slate-500">${escH(z.override_reason || 'Not accepting vehicles right now')} · ${Math.round(z.walking_distance_meters)} m away</p>
+                    </div>
+                </div>
+                <span class="inline-flex items-center text-xs px-2.5 py-1 rounded-full font-bold border ${sc.badge} self-end sm:self-auto">
+                    <span class="w-1.5 h-1.5 rounded-full ${sc.dot} mr-1.5"></span>${statusLabel(z.status)}
+                </span>
+            </div>
+        </div>`;
+        }
 
         return `
         <div class="bg-white rounded-2xl border ${isBest ? 'border-orange-500 ring-2 ring-orange-100 shadow-md' : 'border-slate-200 shadow-sm'} p-4 transition-all hover:border-orange-300">
@@ -173,10 +349,11 @@ function renderRecommendations(data) {
                     </span>
                     <div>
                         <div class="flex items-center space-x-2">
-                            <h4 class="font-bold text-slate-900 text-sm">${z.name}</h4>
+                            <h4 class="font-bold text-slate-900 text-sm">${escH(z.name)}</h4>
                             ${isBest ? '<span class="text-[10px] font-black uppercase tracking-wider bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full">Top Pick</span>' : ''}
+                            ${SOURCE_BADGE[z.count_source] ? `<span class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border ${SOURCE_BADGE[z.count_source][0]}">${SOURCE_BADGE[z.count_source][1]}</span>` : ''}
                         </div>
-                        <p class="text-xs text-slate-500 font-medium">${z.category} · ${z.zone_id}</p>
+                        <p class="text-xs text-slate-500 font-medium">${escH(z.category)}${z.confidence && CONF_LABEL[z.confidence] ? ' · ' + CONF_LABEL[z.confidence] : ''}</p>
                     </div>
                 </div>
 
@@ -196,27 +373,29 @@ function renderRecommendations(data) {
 
             <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-3 pt-3 border-t border-slate-100 text-xs">
                 <div>
-                    <span class="text-slate-400 block text-[10px] uppercase font-bold">Available Spots</span>
-                    <span class="font-black text-sm ${z.available_spaces > 20 ? 'text-emerald-600' : z.available_spaces > 5 ? 'text-amber-600' : 'text-rose-600'}">
-                        ${z.available_spaces} <span class="text-[10px] font-normal text-slate-400">/ ${z.operational_capacity}</span>
-                    </span>
+                    <span class="text-slate-400 block text-[10px] uppercase font-bold">Chance of a free slot</span>
+                    ${z.p_free == null
+                        ? '<span class="font-bold text-slate-400 text-sm">n/a</span>'
+                        : `<span class="font-black text-sm ${pFreePct >= 70 ? 'text-emerald-600' : pFreePct >= 35 ? 'text-amber-600' : 'text-rose-600'}">${pFreePct}%</span>
+                           <span class="text-slate-400 text-[10px] block">${z.likely_full ? 'likely full on arrival' : 'on arrival'}</span>`}
                 </div>
                 <div>
-                    <span class="text-slate-400 block text-[10px] uppercase font-bold">Predicted Occupancy</span>
+                    <span class="text-slate-400 block text-[10px] uppercase font-bold">Expected occupancy</span>
                     <span class="font-bold text-slate-800 text-sm">${occPct}%</span>
                     <div class="w-full bg-slate-100 rounded-full h-1.5 mt-1">
                         <div class="h-1.5 rounded-full ${occPct > 85 ? 'bg-rose-500' : occPct > 65 ? 'bg-amber-500' : 'bg-emerald-500'}" style="width: ${Math.min(100, occPct)}%"></div>
                     </div>
+                    ${z.predicted_low != null ? `<span class="text-slate-400 text-[10px] block mt-0.5">${z.predicted_low}–${z.predicted_high} of ${z.operational_capacity} slots (80% range)</span>` : ''}
                 </div>
                 <div>
-                    <span class="text-slate-400 block text-[10px] uppercase font-bold">Walking Distance</span>
+                    <span class="text-slate-400 block text-[10px] uppercase font-bold">Free slots expected</span>
+                    <span class="font-black text-sm ${z.available_spaces > 20 ? 'text-emerald-600' : z.available_spaces > 5 ? 'text-amber-600' : 'text-rose-600'}">${z.available_spaces}</span>
+                    <span class="text-slate-400 text-[10px] block">of ${z.operational_capacity}</span>
+                </div>
+                <div>
+                    <span class="text-slate-400 block text-[10px] uppercase font-bold">Walking distance</span>
                     <span class="font-bold text-slate-800 text-sm">${Math.round(z.walking_distance_meters)} m</span>
                     <span class="text-slate-400 text-[10px] block">~${z.walking_time_minutes} min walk</span>
-                </div>
-                <div>
-                    <span class="text-slate-400 block text-[10px] uppercase font-bold">Saturation Risk</span>
-                    <span class="font-bold ${satRiskPct > 70 ? 'text-rose-600' : 'text-slate-700'} text-sm">${satRiskPct}%</span>
-                    <span class="text-slate-400 text-[10px] block">P(Occ ≥ 90%)</span>
                 </div>
             </div>
         </div>`;
@@ -237,9 +416,13 @@ async function dispatchToZone(zoneId, zoneName) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ zone_id: zoneId })
         });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!res.ok) {
+            const body = await res.json().catch(() => ({}));
+            if (window.toast && typeof body.detail === 'string') window.toast(body.detail, 'warning');
+            throw new Error(`HTTP ${res.status}`);
+        }
         const data = await res.json();
-        
+
         // Show non-blocking dispatch notification
         const tipBox = document.getElementById('smartTipBox');
         const tipTxt = document.getElementById('smartTipText');
@@ -253,6 +436,10 @@ async function dispatchToZone(zoneId, zoneName) {
 }
 window.dispatchToZone = dispatchToZone;
 
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+    document.getElementById('etaSlider')?.addEventListener('input', onEtaInput);
+    syncHorizonControls();
+    await loadDestinations();
     fetchRecommendations();
+    setInterval(() => fetchRecommendations(true), 60000);   // keep the picture fresh while the page stays open
 });

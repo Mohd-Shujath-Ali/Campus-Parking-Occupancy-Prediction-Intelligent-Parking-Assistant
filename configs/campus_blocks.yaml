@@ -1,0 +1,35 @@
+# Campus blocks a user can belong to (their "home block").
+#
+# Walking distances in configs/zones.yaml are measured from a small set of reference
+# destinations (the `anchor` values below). A block that is not itself a reference
+# destination is mapped to the adjacent reference block it is physically next to, so its
+# students and faculty get the parking grounds nearest to them.
+#
+# To add a block: give it an id, a display name and the adjacent anchor. No code changes.
+# Anchors must be one of the destination keys under `walking_distances_meters` in zones.yaml.
+#
+# NOTE: the adjacency below was inferred from the landmark lists in zones.yaml. Have the
+# estate office confirm it against the campus map before go-live.
+
+blocks:
+  # --- Reference destinations (distances measured directly) ---
+  - {id: Block_1,            name: "Block 1 (Auditorium / Health Centre)",   anchor: Block_1,            group: Academic}
+  - {id: Block_26_CSE,       name: "Block 26 (School of CSE)",               anchor: Block_26_CSE,       group: Academic}
+  - {id: Block_57_Agri,      name: "Block 57 (School of Agriculture)",       anchor: Block_57_Agri,      group: Academic}
+  - {id: Architecture_Block, name: "Architecture & Design Block",            anchor: Architecture_Block, group: Academic}
+  - {id: Law_Block,          name: "School of Law",                          anchor: Law_Block,          group: Academic}
+  - {id: MB_Food_Square,     name: "MB Food Square & Hospital",              anchor: MB_Food_Square,     group: Amenities}
+  - {id: Central_Mess_2,     name: "Central Mess 2 (Block 41-D)",            anchor: Central_Mess_2,     group: Amenities}
+  - {id: Sports_Ground,      name: "Sports Stadium & Arena",                 anchor: Sports_Ground,      group: Amenities}
+
+  # --- Adjacent blocks (use the nearest reference destination) ---
+  - {id: Block_39_Innovation, name: "Block 39 (Innovation Studio / CSE Labs)", anchor: Block_26_CSE,       group: Academic}
+  - {id: Admissions_Block,    name: "Division of Admissions",                  anchor: Block_26_CSE,       group: Administration}
+  - {id: Block_55_Mech,       name: "Block 55 (School of Mechanical Engg.)",   anchor: Block_57_Agri,      group: Academic}
+  - {id: Bio_Engineering,     name: "School of Bio Engineering",               anchor: Block_57_Agri,      group: Academic}
+  - {id: Product_Industrial,  name: "Product & Industrial Design Block",       anchor: Architecture_Block, group: Academic}
+  - {id: Management_Block,    name: "Management Block",                        anchor: Law_Block,          group: Academic}
+  - {id: Security_Office,     name: "Security Office",                         anchor: Architecture_Block, group: Administration}
+  - {id: Block_41D,           name: "Block 41-D",                              anchor: Central_Mess_2,     group: Residential}
+  - {id: GH5_Hostel,          name: "GH-5 Girls Hostel",                       anchor: Law_Block,          group: Residential}
+  - {id: BH2_Hostel,          name: "Boys Hostel 2 / BH-3",                    anchor: Sports_Ground,      group: Residential}

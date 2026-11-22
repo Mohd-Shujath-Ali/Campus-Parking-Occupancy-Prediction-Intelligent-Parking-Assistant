@@ -1,4 +1,4 @@
-Horizon,target_coverage,coverage,mean_width
-H15,0.8,0.811,16.507
-H30,0.8,0.815,17.074
-H60,0.8,0.822,18.172
+Horizon,interval_coverage,interval_target,interval_coverage_events,interval_mean_width
+H15,0.798,0.8,0.818,10.18
+H30,0.793,0.8,0.815,11.96
+H60,0.801,0.8,0.893,14.23

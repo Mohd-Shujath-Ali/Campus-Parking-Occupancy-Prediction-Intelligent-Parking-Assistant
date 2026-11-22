@@ -16,10 +16,10 @@ This project delivers an end-to-end Machine Learning, Computer Vision, and Decis
 
 Unlike traditional marked-stall sensor systems, this architecture addresses **open, unstructured campus grounds** using:
 1. **Perception**: Fine-tuned YOLO (`best.pt`, mAP50=91.6%) and Pretrained YOLO (`yolo26l.pt`) with Ground-Contact Point Jordan Ray-Casting Point-in-Polygon (PIP), cross-camera Global Spatial NMS ($d < 2.5\text{m}$), and OpenCV pre-inference quality diagnostics (blur, underexposure, glare); optional in-browser YOLO via WebGPU/WASM.
-2. **Zero-Leakage Time-Series Pipeline**: Multi-horizon forecasting ($+15, +30, +60$ min) with a chronological 70/15/15 split (1 h purge buffer) and 22 causal features: sin/cos time, zone identity, event/exam flags, lags ($t-15 \dots t-60$), velocity and shifted rolling statistics. All preprocessing lives in one persisted scikit-learn `Pipeline`/`ColumnTransformer`; hyperparameters are in `configs/model_config.yaml` (Optuna-tuned overrides in `configs/tuned_params.yaml`).
-3. **Multi-Model Comparative Benchmarking**: Persistence and zone-aware Seasonal Mean baselines, Ridge, Random Forest, LightGBM, a leak-free blend stack, and XGBoost tuned by Bayesian search (Optuna TPE vs random search) with `TimeSeriesSplit` cross-validation; an optional `GridSearchCV` runner is kept in `models/train.py --grid-search`.
+2. **Zero-Leakage Time-Series Pipeline**: Multi-horizon forecasting ($+15, +30, +60$ min, interpolated to any arrival time) with a chronological 70/15/15 split (1 h purge buffer) and 41 causal features: sin/cos time, zone identity, lags ($t-15 \dots t-60$), velocity, shifted rolling statistics, a leave-one-week-out **normal-day profile** per zone and time of week, and what is already known about the *arrival* time (events, exams, holidays, distance to a lecture bell). Calendar data comes from the admin-managed campus calendar. All preprocessing lives in one persisted scikit-learn `Pipeline`/`ColumnTransformer`; hyperparameters are in `configs/model_config.yaml` (Optuna-tuned overrides in `configs/tuned_params.yaml`). Design, evidence and limits: [`docs/FORECASTING.md`](docs/FORECASTING.md).
+3. **Multi-Model Comparative Benchmarking**: Persistence, normal-day-profile and zone-aware Seasonal Mean baselines, Ridge, Random Forest (bagging) and XGBoost (boosting), compared with `experiments/forecast_ablation.py`; boosting wins and a bagging blend adds nothing. Hyperparameters were Bayesian-tuned (Optuna TPE) on the earlier dataset with `TimeSeriesSplit` cross-validation; an optional `GridSearchCV` runner is kept in `models/train.py --grid-search`.
 4. **Dual-Head Architecture**: Multi-horizon count regressor plus a Saturation Classifier ($P(\text{Occ} \ge 90\%)$) using `scale_pos_weight` and isotonic probability calibration on the validation period.
-5. **Uncertainty & Demand Forecasting**: 80% conformal prediction intervals (held-out coverage 0.81-0.82) and a calendar-only demand forecaster for days-ahead planning with exam/event what-if scenarios.
+5. **Uncertainty & Demand Forecasting**: calibrated 80% ranges (held-out coverage 0.79-0.80, 0.82-0.89 during events), the **chance of a free slot on arrival** (Brier 0.012-0.016 vs 0.056 for the base rate), and a calendar-only demand forecaster for days-ahead planning that applies the campus calendar automatically.
 6. **Explainable AI (SHAP)**: Global beeswarm and mean $|SHAP|$ rankings, dependence plots, local waterfall traces, and a live per-prediction breakdown at `GET /api/explain`.
 7. **Error Analysis & Diagnostics**: Residuals vs. fitted, Q-Q plots, per-zone / per-hour / per-regime error tables, worst-case review and classifier calibration.
 8. **Anti-Herding Traffic Dispersion**: A softmax lead-zone selector among near-tied lots plus a real-time `InFlightDispatchTracker` (15-minute TTL, 35% capacity cap) fed by `POST /api/navigate`.
@@ -51,21 +51,24 @@ Calibrated against aerial surveys from `collab_content_backup/LPU PARKINGz`:
 
 ## 3. Machine Learning Benchmark Results (Holdout Test Split)
 
-> **Data caveat.** The occupancy series in `data/processed/lpu_timeseries.csv` is **simulated** by `data_pipeline/generator.py` (12 zones, 5-minute cadence, 56 days) until real detector counts are logged. These results show that the pipeline works, not how well it would forecast real LPU traffic. A noise-free oracle on this simulator scores 3.38 cars MAE, so the tuned model is within ~0.3 cars of the ceiling.
+> **Data caveat.** The occupancy series in `data/processed/lpu_timeseries.csv` is **simulated** by `data_pipeline/generator.py` (12 zones, 5-minute cadence, 18 weeks, with exam windows, holidays and events in every split) until real detector counts are logged. These results show that the pipeline works, not how well it would forecast real LPU traffic; expect real accuracy to be lower. The app labels itself "demo data" until a camera reports.
+>
+> Prefer the skill column to $R^2$: occupancy is strongly autocorrelated, so even "same as now" scores $R^2 \approx 0.97$ at +15 min.
 
-| Model Architecture | Forecast Horizon | Data Partition | MAE (Cars) | RMSE (Cars) | $R^2$ Score | Surge Inflection MAE |
+| Model Architecture | Forecast Horizon | Data Partition | MAE (Cars) | RMSE (Cars) | $R^2$ Score | Skill vs Persistence |
 | :--- | :---: | :---: | :---: | :---: | :---: | :---: |
-| **Persistence Baseline** | +15 min | Holdout Test | 6.631 | 10.116 | 0.9794 | 15.329 |
-| **Seasonal Historical Mean** (zone × weekday × hour) | +15 min | Holdout Test | 6.354 | 9.925 | 0.9802 | — |
-| **Ridge Regression ($L_2$)** | +15 min | Holdout Test | 6.129 | 9.157 | 0.9831 | 15.290 |
-| **Random Forest Ensemble** | +15 min | Holdout Test | 4.163 | 5.673 | 0.9935 | 7.368 |
-| **Tuned XGBoost** (Optuna) | +15 min | Validation | 4.049 | 6.279 | 0.9918 | — |
-| **Tuned XGBoost** (Optuna) | +15 min | Holdout Test | **3.677** | **4.945** | **0.9951** | **5.027 (−67% vs Pers.)** |
-| **Tuned XGBoost** (Optuna) | +30 min | Holdout Test | 3.717 | 4.990 | 0.9950 | — |
-| **Tuned XGBoost** (Optuna) | +60 min | Holdout Test | 3.783 | 5.093 | 0.9948 | — |
-| **Saturation Classifier** (isotonic-calibrated) | +15 min | Holdout Test | — | — | — | **PR-AUC = 0.9041** (Recall: 75.0%, Precision 0.87) |
+| **Persistence Baseline** ("same as now") | +15 / +30 / +60 min | Holdout Test | 5.555 / 8.912 / 14.683 | 12.40 / 19.00 / 29.37 | 0.969 / 0.928 / 0.828 | — |
+| **Normal-day Profile** (no live data) | +15 / +30 / +60 min | Holdout Test | 8.326 / 8.325 / 8.325 | 17.43 | 0.939 | −50% / +7% / +43% |
+| **Seasonal Historical Mean** (zone × weekday × hour) | +15 min | Holdout Test | 15.009 | 31.57 | 0.801 | −170% |
+| **Ridge Regression ($L_2$)** | +15 / +30 / +60 min | Holdout Test | 4.483 / 6.088 / 8.216 | 10.09 / 13.34 / 17.09 | 0.980 / 0.964 / 0.942 | 19% / 32% / 44% |
+| **Random Forest** (bagging) | +15 / +30 / +60 min | Holdout Test | 3.804 / 4.614 / 5.553 | 6.09 / 7.09 / 8.44 | 0.993 / 0.990 / 0.986 | 32% / 48% / 62% |
+| **Tuned XGBoost** (boosting) | +15 min | Validation | 3.542 | 5.996 | 0.9930 | 36% |
+| **Tuned XGBoost** (boosting) | +15 / +30 / +60 min | Holdout Test | **3.485 / 4.151 / 4.776** | **5.19 / 6.18 / 6.93** | **0.995 / 0.992 / 0.990** | **37% / 53% / 67%** |
+| **Saturation Classifier** (isotonic-calibrated) | +15 min | Holdout Test | — | — | — | **PR-AUC = 0.9725** (Recall 90.3%, Precision 0.91) |
 
-Extended comparison (LightGBM, a chronological blend stack, default-vs-tuned XGBoost), Bayesian-vs-random search, error analysis and SHAP interpretation are in [`docs/results.md`](docs/results.md); raw tables are in `artifacts/model_comparison.csv` and `artifacts/model_comparison_full.csv`.
+At lecture-bell windows (+15 min) XGBoost's error is 4.4 vs 11.3 for persistence. By kind of day at +60 min: normal weekday 5.3, weekend 4.0, holiday 4.2, exam day 4.6, **event 8.9** (persistence 20.5). Following the recommendation finds a free slot **99.7-99.9%** of the time on the held-out replay, against 91.9% for walking to the nearest ground (see [`docs/FORECASTING.md`](docs/FORECASTING.md)).
+
+Raw tables: `artifacts/model_comparison.csv`, `artifacts/regime_metrics.csv`, `artifacts/ablation.csv`, `artifacts/recommendation_eval.csv`. [`docs/results.md`](docs/results.md) predates this version (earlier 56-day dataset); treat its numbers as historical.
 
 ---
 
@@ -94,19 +97,28 @@ python -m explainability.shap_analysis
 ```
 *Outputs: Generates TreeSHAP summary beeswarm, feature importance bar charts, and local rush-hour / steady-state decision waterfalls to `artifacts/figures/`.*
 
-### 3. Reproduce the extended experiments
+### 3. Reproduce the experiments
 ```bash
-python -m experiments.compare_models   # Ridge / RF / XGBoost / LightGBM / stacking vs baselines
-python -m experiments.tune_xgboost     # Optuna TPE vs random search -> configs/tuned_params.yaml
-python -m experiments.error_analysis   # per-zone / hour / regime errors, worst cases, classifier calibration
-python -m experiments.explain          # SHAP dependence and local plots
+python -m experiments.forecast_ablation              # old vs new features, direct vs profile-relative, bagging vs boosting
+python -m experiments.interval_comparison            # CQR vs residual-distribution intervals
+python -m experiments.replay_recommendations --tune  # choose ranker weights on the validation period
+python -m experiments.replay_recommendations         # does following the recommendation find a slot? (test period)
+python -m models.retrain --dry-run                   # champion/challenger on real counts, once cameras report
+# Earlier experiments (written for the previous dataset and feature set; may need adapting):
+python -m experiments.compare_models
+python -m experiments.tune_xgboost
+python -m experiments.error_analysis
+python -m experiments.explain
 ```
 
 ### 4. Launch FastAPI Web Application & API Server
 ```bash
 python -m uvicorn api.main:app --host 0.0.0.0 --port 8000 --reload
 ```
-- **Driver Assistant**: `http://localhost:8000/` (Arrival horizon planning, anti-herding dispatch, counterfactual recommendations).
+Everyone signs in at `/login` (see [`docs/ACCESS_CONTROL.md`](docs/ACCESS_CONTROL.md)); each role sees only its pages.
+- **Driver Assistant**: `http://localhost:8000/` (arrival-time slider, chance of a free slot per ground, data-source labels, computed arrival tips, anti-herding dispatch).
+- **Campus Calendar** (admin): `http://localhost:8000/calendar` (events with venue and expected vehicles, exam windows, holidays; forecasts use them immediately).
+- **Model Health** (admin): `http://localhost:8000/model` (model version and training data, where each ground's count comes from, live accuracy and drift).
 - **Admin Command Center**: `http://localhost:8000/admin` (Real-time occupancy charts with 80% forecast ranges, operational alerts, camera sensor telemetry, invariant stream detection).
 - **Vision & ROI Studio**: `http://localhost:8000/vision` (Live webcam stream, interactive polygon/box ROI drawing, dual-model YOLO benchmarking).
 - **Model Analytics & XAI**: `http://localhost:8000/analytics` (Benchmark comparisons, SHAP attribution tabs, residual diagnostics, zone × hour demand heatmaps, 7-day demand outlook with exam/event scenarios).
@@ -127,9 +139,11 @@ pytest tests/ -v
 ## 5. REST API Documentation
 
 - `GET /api/health`, `GET /api/zones`: system status and metadata for all 12 zones.
-- `POST /api/predict`: occupancy forecast for a zone and horizon (+15/+30/+60 min) with an 80% interval (`predicted_low/high`), `lag_source` (`observed|partial|estimated`) and `stream_frozen`.
-- `GET /api/recommendations?destination=Block_26_CSE&horizon_minutes=15`: ranked parking grounds (destination matching is case/space tolerant); `POST /api/navigate` registers an in-flight driver dispatch.
-- `GET /api/snapshot`: all-zone forecast with forecast ranges and server-side alerts; `GET /api/metrics`: benchmark table and classifier metrics.
+- `POST /api/predict`: occupancy forecast for a zone at any horizon from 5 to 60 min (interpolated between the trained +15/+30/+60) with an 80% interval (`predicted_low/high`), `p_free` (chance of a free slot), `lag_source` (`observed|partial|estimated`) and `stream_frozen`. Exam/bell flags come from the campus calendar unless overridden.
+- `GET /api/recommendations?destination=Block_26_CSE&horizon_minutes=30`: ranked parking grounds with `p_free`, 80% range, `confidence` and `count_source` per ground, plus `data_mode` and today's `conditions` (destination matching is case/space tolerant); `POST /api/navigate` registers an in-flight driver dispatch.
+- `GET /api/snapshot`: every ground right now (live camera count, or labelled demo/estimate) plus the +15 min forecast, ranges and server-side alerts; `GET /api/metrics`: benchmark table and classifier metrics.
+- `GET|POST|DELETE /api/calendar`, `GET /api/calendar/context`, `POST /api/calendar/preview`: the campus calendar (writes are admin-only).
+- `GET /api/model/status`, `POST /api/model/reload` (admin): model version, data sources, live accuracy and drift; load a newly trained model without a restart.
 - `GET /api/explain?zone_id=ZONE_BLOCK1&current_count=80`: SHAP breakdown of a forecast (base value + per-feature effect in cars); `GET /api/shap-figure/{name}`: generated diagnostic figures.
 - `GET /api/demand-forecast?days=7&zone_id=ZONE_MAINPARK_NORTH&exam_dates=2026-11-23`: days-ahead peak time/level per zone with exam/event what-if.
 - `GET /api/zone-analysis/{zone_id}` and `GET /api/heatmap?kind=zone_hour|zone_week|forecast`: usage profiles and heatmap matrices.
@@ -140,15 +154,15 @@ pytest tests/ -v
 
 ## 6. Data Sources, Serving Notes & Limitations
 
-**Occupancy time series.** Simulated (see the caveat in Section 3). Replace it with real counts using the ingest endpoint and `python -m data_collection.store --out data/processed/lpu_live.csv`.
+**Occupancy time series.** Simulated (see the caveat in Section 3). Real counts replace it through `POST /api/ingest`; `python -m models.retrain` then retrains on them and promotes the new model only if it is better. `python -m scripts.simulate_ingest` feeds fake counts to a running server to try the loop.
 
 **Vision data.** The YOLO training images in `collab_content_backup/LPU---Parking-1` come from a Roboflow export (licence CC BY 4.0, see its `README.roboflow.txt`). The image file names follow the timestamp pattern of the public PKLot dataset, so confirm the original source and cite it before submission.
 
-**Serving.** `/api/predict` builds lags from a rolling per-zone history (`models/history.py`, shared with `/api/ingest`) and reports `lag_source`; a frozen camera feed (6 identical readings over at least 10 minutes) sets `stream_frozen`. Counts in `/api/recommendations` and `/api/snapshot` are simulated demo values until the camera counter feeds the history buffer.
+**Serving.** `/api/recommendations` and `/api/snapshot` use the latest ingested count per ground (rolling history in `models/history.py`, reloaded from the observation store at startup). A reading up to 7 min old is live, up to 30 min stale (lower confidence); with no usable reading a ground shows the normal-day estimate. A simulated demo feed is used only while no camera has ever reported, and is labelled everywhere it appears. A frozen feed (6 identical readings over 10+ minutes) sets `stream_frozen`.
 
-**Known limitations.** The test period contains no exam or event days (they fall in train/validation), so those regimes are not evaluated; intervals are calibrated on a single validation window; tuned parameters were searched at +15 min and reused for +30/+60. Demand-forecast exam/event effects rest on one exam week and two event days. The notebooks in `notebooks/01_exploratory_data_analysis.ipynb` and `02_model_training_and_tuning.ipynb` use their own simpler `GridSearchCV` run (MAE 4.9 at +15 min), which is weaker than the Optuna-tuned model used by the API (3.68).
+**Known limitations.** The data is synthetic, so accuracy on real traffic is unknown and will be lower. Event calibration rests on three validation events. XGBoost hyper-parameters were tuned on the earlier dataset and reused. Counts are per ground, not per slot. Weather is not modelled. The static SHAP figures in `artifacts/figures/` predate the current model (`GET /api/explain` is current). The notebooks in `notebooks/` use an older, simpler pipeline. Full list: [`docs/FORECASTING.md`](docs/FORECASTING.md#limitations).
 
-**Not yet done:** real (logged) occupancy data actually collected, public deployment of the API, rolling-origin evaluation that holds out an exam week, drift monitoring.
+**Not yet done:** real (logged) occupancy data actually collected, a server-side camera worker that turns RTSP/HTTP streams into `/api/ingest` counts (camera sources are stored but only the browser Vision page produces counts today), public deployment of the API, slot-level occupancy.
 
 ---
 

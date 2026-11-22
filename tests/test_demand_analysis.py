@@ -2,8 +2,9 @@ import pandas as pd
 from fastapi.testclient import TestClient
 
 from api.main import app
+from tests.auth_helpers import login_client
 
-c = TestClient(app)
+c = login_client()   # demand forecast / heatmaps are admin analytics
 
 
 def test_demand_forecast_shape_and_ranges():

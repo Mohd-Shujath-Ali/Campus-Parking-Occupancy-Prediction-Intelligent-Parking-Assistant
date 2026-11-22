@@ -1,5 +1,8 @@
 # Results: model comparison, tuning, error analysis, explainability
 
+> **Historical.** This document describes the earlier 56-day dataset and 22-feature model. The forecaster, features, data and
+> benchmark numbers have since been rebuilt; see [FORECASTING.md](FORECASTING.md) and the README for current results.
+
 All numbers are on the **chronological hold-out test period** (2026-10-18 16:20 → 2026-10-26 22:55, 8.3 days, 28,608 rows) of the **simulated** 56-day LPU dataset. Reproduce with the commands at the end. Read the limitations first: the data is generated, so these results show the methodology works, not how well it would forecast real traffic.
 
 ## 1. Validation design

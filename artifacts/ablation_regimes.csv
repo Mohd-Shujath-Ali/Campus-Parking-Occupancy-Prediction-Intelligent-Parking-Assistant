@@ -1,0 +1,121 @@
+model,horizon,regime,n,MAE
+persistence,H15,normal weekday,18804,6.508
+persistence,H15,weekend,19428,3.7
+persistence,H15,event,2916,7.184
+persistence,H15,exam day,16836,7.089
+persistence,H15,holiday,6912,3.751
+persistence,H30,normal weekday,18804,10.782
+persistence,H30,weekend,19428,5.22
+persistence,H30,event,2916,11.931
+persistence,H30,exam day,16836,12.04
+persistence,H30,holiday,6912,5.309
+persistence,H60,normal weekday,18804,18.117
+persistence,H60,weekend,19428,7.955
+persistence,H60,event,2916,20.498
+persistence,H60,exam day,16836,20.36
+persistence,H60,holiday,6912,7.972
+profile,H15,normal weekday,18804,8.899
+profile,H15,weekend,19428,4.229
+profile,H15,event,2916,28.985
+profile,H15,exam day,16836,10.497
+profile,H15,holiday,6912,4.279
+profile,H30,normal weekday,18804,8.921
+profile,H30,weekend,19428,4.261
+profile,H30,event,2916,28.683
+profile,H30,exam day,16836,10.483
+profile,H30,holiday,6912,4.279
+profile,H60,normal weekday,18804,8.989
+profile,H60,weekend,19428,4.359
+profile,H60,event,2916,27.504
+profile,H60,exam day,16836,10.494
+profile,H60,holiday,6912,4.289
+seasonal_mean,H15,normal weekday,18804,12.697
+seasonal_mean,H15,weekend,19428,5.319
+seasonal_mean,H15,event,2916,33.339
+seasonal_mean,H15,exam day,16836,12.502
+seasonal_mean,H15,holiday,6912,46.909
+seasonal_mean,H30,normal weekday,18804,13.833
+seasonal_mean,H30,weekend,19428,5.63
+seasonal_mean,H30,event,2916,32.577
+seasonal_mean,H30,exam day,16836,12.509
+seasonal_mean,H30,holiday,6912,47.05
+seasonal_mean,H60,normal weekday,18804,18.479
+seasonal_mean,H60,weekend,19428,7.328
+seasonal_mean,H60,event,2916,32.412
+seasonal_mean,H60,exam day,16836,15.32
+seasonal_mean,H60,holiday,6912,47.807
+xgb_old_features,H15,normal weekday,18804,3.674
+xgb_old_features,H15,weekend,19428,3.092
+xgb_old_features,H15,event,2916,5.867
+xgb_old_features,H15,exam day,16836,3.848
+xgb_old_features,H15,holiday,6912,3.382
+xgb_old_features,H30,normal weekday,18804,4.484
+xgb_old_features,H30,weekend,19428,3.684
+xgb_old_features,H30,event,2916,8.125
+xgb_old_features,H30,exam day,16836,4.507
+xgb_old_features,H30,holiday,6912,4.478
+xgb_old_features,H60,normal weekday,18804,5.441
+xgb_old_features,H60,weekend,19428,4.318
+xgb_old_features,H60,event,2916,10.157
+xgb_old_features,H60,exam day,16836,5.184
+xgb_old_features,H60,holiday,6912,6.556
+xgb_direct,H15,normal weekday,18804,3.651
+xgb_direct,H15,weekend,19428,3.03
+xgb_direct,H15,event,2916,5.785
+xgb_direct,H15,exam day,16836,3.586
+xgb_direct,H15,holiday,6912,3.093
+xgb_direct,H30,normal weekday,18804,4.4
+xgb_direct,H30,weekend,19428,3.552
+xgb_direct,H30,event,2916,7.658
+xgb_direct,H30,exam day,16836,4.151
+xgb_direct,H30,holiday,6912,3.679
+xgb_direct,H60,normal weekday,18804,5.258
+xgb_direct,H60,weekend,19428,4.026
+xgb_direct,H60,event,2916,8.905
+xgb_direct,H60,exam day,16836,4.618
+xgb_direct,H60,holiday,6912,4.217
+xgb_residual,H15,normal weekday,18804,3.647
+xgb_residual,H15,weekend,19428,3.045
+xgb_residual,H15,event,2916,6.986
+xgb_residual,H15,exam day,16836,3.478
+xgb_residual,H15,holiday,6912,3.123
+xgb_residual,H30,normal weekday,18804,4.527
+xgb_residual,H30,weekend,19428,3.559
+xgb_residual,H30,event,2916,8.179
+xgb_residual,H30,exam day,16836,4.047
+xgb_residual,H30,holiday,6912,3.701
+xgb_residual,H60,normal weekday,18804,5.956
+xgb_residual,H60,weekend,19428,4.023
+xgb_residual,H60,event,2916,9.613
+xgb_residual,H60,exam day,16836,4.582
+xgb_residual,H60,holiday,6912,4.2
+rf_residual,H15,normal weekday,18804,4.563
+rf_residual,H15,weekend,19428,3.312
+rf_residual,H15,event,2916,7.177
+rf_residual,H15,exam day,16836,4.661
+rf_residual,H15,holiday,6912,3.379
+rf_residual,H30,normal weekday,18804,5.055
+rf_residual,H30,weekend,19428,3.716
+rf_residual,H30,event,2916,8.474
+rf_residual,H30,exam day,16836,5.182
+rf_residual,H30,holiday,6912,3.801
+rf_residual,H60,normal weekday,18804,5.677
+rf_residual,H60,weekend,19428,4.079
+rf_residual,H60,event,2916,9.878
+rf_residual,H60,exam day,16836,5.62
+rf_residual,H60,holiday,6912,4.191
+blend,H15,normal weekday,18804,3.671
+blend,H15,weekend,19428,3.069
+blend,H15,event,2916,6.952
+blend,H15,exam day,16836,3.505
+blend,H15,holiday,6912,3.137
+blend,H30,normal weekday,18804,4.535
+blend,H30,weekend,19428,3.603
+blend,H30,event,2916,8.167
+blend,H30,exam day,16836,4.116
+blend,H30,holiday,6912,3.726
+blend,H60,normal weekday,18804,5.791
+blend,H60,weekend,19428,4.104
+blend,H60,event,2916,9.53
+blend,H60,exam day,16836,4.726
+blend,H60,holiday,6912,4.248

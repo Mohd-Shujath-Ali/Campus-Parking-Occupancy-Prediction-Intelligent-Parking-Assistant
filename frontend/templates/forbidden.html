@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+
+{% block title %}Not available — LPU Smart Parking{% endblock %}
+
+{% block content %}
+<section class="max-w-lg mx-auto text-center bg-white border border-slate-200 rounded-2xl shadow-sm p-10 space-y-4 mt-8">
+    <div class="w-14 h-14 mx-auto rounded-2xl bg-rose-50 text-rose-600 flex items-center justify-center">
+        <i class="fa-solid fa-lock text-xl"></i>
+    </div>
+    <h2 class="text-xl font-black text-slate-900">This page isn't available for your role</h2>
+    <p class="text-sm text-slate-500">You are signed in as <span class="font-bold text-slate-700">{{ user.role_label }}</span>. If you need access, contact the parking administrator.</p>
+    <a href="{{ '/admin' if 'view_ops' in perms else '/' }}" class="inline-flex items-center space-x-2 bg-slate-900 hover:bg-orange-600 text-white font-bold px-5 py-2.5 rounded-xl text-sm transition-all">
+        <i class="fa-solid fa-arrow-left"></i><span>Back to my dashboard</span>
+    </a>
+</section>
+{% endblock %}
