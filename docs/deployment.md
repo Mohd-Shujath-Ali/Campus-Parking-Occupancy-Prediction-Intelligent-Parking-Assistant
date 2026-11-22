@@ -41,20 +41,26 @@ Running from that simulated bundle: cold start ≈ 2 s, ≈ 360 MB RAM, every pa
 - **Cold starts.** After idle time the first request takes a few seconds while Python imports and the models load.
 - **Limits.** Request and response bodies are capped at ~4.5 MB, which is why the ONNX models live in `public/`.
 
-## Option B: Render (`render.yaml`)
-Blueprint for a single web service from the `testing` branch (installs `requirements-render.txt`, which points at
-the same lean `requirements.txt`). Render may require a payment card even for the free plan.
+## Option B: Render with Docker (`render.yaml`)
+Blueprint for one Docker web service built from `./Dockerfile` (the lean image) on the `main` branch, with a 1 GB
+persistent disk at `/var/data` for the SQLite databases. **Render dashboard → New → Blueprint → select the repo**, and
+enter `ADMIN_PASSWORD` when asked. Step by step, plan/memory notes and the free-plan variant: [DOCKER.md](../DOCKER.md#6-deploying-on-render).
 
-## Option C: Docker
+Important: accounts, the calendar and camera counts are SQLite files. They persist only on a disk (paid plans, one
+instance); without one they reset on every restart. Set `COOKIE_SECURE=1` (the blueprint does).
+
+## Option C: Docker locally
 ```bash
+export ADMIN_PASSWORD='Roadside-Pass-2026'
 docker compose up --build -d        # serves on http://localhost:8000
 ```
-The Dockerfiles install `requirements-full.txt` (adds OpenCV, torch and Ultralytics), so server-side YOLO works.
-See `DOCKER.md` for the GPU variant.
+The default image is the lean one. `docker build --target full .` adds OpenCV, torch and Ultralytics for server-side
+YOLO. See [DOCKER.md](../DOCKER.md) for the settings and the GPU variant.
 
 ## Which features work where
-| Feature | Vercel / Render (lean) | Docker / local (full) |
+| Feature | Vercel / Render (lean) | Docker `full` target / local (full) |
 |---|---|---|
+| Login, accounts, calendar | Render with a disk: yes. Vercel: no (no persistent storage) | yes |
 | Forecasts, intervals, saturation risk, recommendations, demand outlook, heatmaps, zone analysis | yes | yes |
 | `/api/explain` (exact TreeSHAP via XGBoost) | yes | yes |
 | In-browser YOLO (ONNX) | yes | yes |

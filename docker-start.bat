@@ -25,6 +25,9 @@ if %ERRORLEVEL% equ 0 (
     echo  API Healthcheck:  http://localhost:8000/api/health
     echo  OpenAPI Docs:     http://localhost:8000/docs
     echo.
+    echo  Sign in as "admin". Password = ADMIN_PASSWORD if you set it, otherwise the
+    echo  one-time password printed by:  docker compose logs ^| findstr "one-time"
+    echo.
     echo  To view container logs:  docker compose logs -f
     echo  To stop container:       docker compose down
     echo =========================================================================

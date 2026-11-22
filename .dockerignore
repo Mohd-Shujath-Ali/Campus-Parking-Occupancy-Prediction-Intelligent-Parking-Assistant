@@ -3,6 +3,17 @@
 .gitignore
 .gitattributes
 
+# Local state and SECRETS: accounts database, demo passwords, the admin one-time password, camera counts.
+# `COPY data/` would otherwise bake all of it into the image.
+data/live/
+**/*.db
+**/*.db-wal
+**/*.db-shm
+**/demo_credentials.csv
+**/initial_admin_password.txt
+.env
+.env.*
+
 # Python artifacts
 __pycache__/
 *.py[cod]
@@ -29,18 +40,16 @@ env/
 .DS_Store
 Thumbs.db
 
-# Notebook checkpoints
+# Not needed at runtime
+tests/
+notebooks/
+experiments/
+docs/
 .ipynb_checkpoints/
 Untitled0.ipynb
+frontend_dist/
+artifacts/archive/
+*.md
 
-# Dataset training directories (weights are kept, but raw 400MB image batches excluded from build context)
-collab_content_backup/LPU---Parking-1/
-collab_content_backup/.config/
-collab_content_backup/LPU PARKINGz/
-collab_content_backup/runs/detect/train/events*
-collab_content_backup/runs/detect/train/args.yaml
-collab_content_backup/runs/detect/val/
-
-# Keep model weights explicitly:
-!collab_content_backup/runs/detect/train/weights/best.pt
-!collab_content_backup/yolo26l.pt
+# YOLO dataset and training runs (hundreds of MB; the app never reads them). Weights live in models/weights.
+collab_content_backup/
