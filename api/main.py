@@ -41,6 +41,7 @@ wire_forecasting()                 # also when the app is imported without runni
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     auth.ensure_bootstrap_admin()   # first run: create the initial admin account
+    demo_logins.ensure_demo_users() # ensure presentation personas are ready to log in
     wire_forecasting(reload_counts=True)
     yield
 

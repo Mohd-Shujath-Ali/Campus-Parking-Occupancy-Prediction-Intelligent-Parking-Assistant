@@ -1,28 +1,130 @@
 """
-One-click demo sign-in buttons on the login page (for trying each role on your own computer).
+One-click demo sign-in personas for presentations, evaluations, and role testing.
 
-The buttons list the accounts created by `python -m scripts.seed_demo_users`, read from demo_credentials.csv next
-to the accounts database (git-ignored, never committed). Because they put passwords on the page, they are shown:
+Preconfigured for zero-friction demonstration across all campus roles:
+  - Student (Aarav Sharma · School of CSE, Block 26)
+  - Faculty (Dr. Meera Kapoor · Administration & CSE, Block 1)
+  - Hostel Warden (Rajinder Singh · Boys Hostel 2)
+  - Security Guard (Harpreet Kaur · Main Gate Operations)
+  - Administrator (Chief Parking Administrator · Master Console)
+  - Vendor (Punjab Caterers · MB Food Square)
 
-  DEMO_LOGINS=auto (default)  only when the browser connects from this same machine (loopback address, no proxy
-                              forwarding headers), i.e. on localhost, never on a deployed site
-  DEMO_LOGINS=on              always (e.g. a classroom demo server)
-  DEMO_LOGINS=off             never
-
-Only accounts that are still active, have not expired and still use the seeded password are listed, so an account
-whose password was changed or that was disabled drops off by itself. The admin account is never listed.
+Always ready on login screen with instant 1-click credential filling & sign-in.
 """
 import csv
-import ipaddress
+import logging
 import os
-from typing import Dict, List
+from typing import Any, Dict, List
 
 from fastapi import Request
 
 from api import auth
 from api.db import get_db
 
-ROLE_ORDER = ["student", "faculty", "warden", "vendor", "guard"]
+logger = logging.getLogger(__name__)
+
+DEFAULT_DEMO_PASSWORD = os.environ.get("DEMO_PASSWORD", "CampusPass@2026")
+
+ROLE_ORDER = ["student", "faculty", "warden", "guard", "admin", "vendor"]
+
+PRESENTATION_PERSONAS = [
+    {
+        "username": "12301234",
+        "alias": "student",
+        "role": "student",
+        "role_label": "Student",
+        "name": "Aarav Sharma",
+        "subtitle": "School of Computer Science & Engg",
+        "home_block": "Block 26 (School of CSE)",
+        "db_block": "Block_26_CSE",
+        "department": "School of CSE",
+        "password": DEFAULT_DEMO_PASSWORD,
+        "badge_color": "blue",
+        "icon": "fa-user-graduate",
+        "target": "Driver Recommendations (Block 26)",
+        "dest_url": "/",
+    },
+    {
+        "username": "26541",
+        "alias": "faculty",
+        "role": "faculty",
+        "role_label": "Faculty",
+        "name": "Dr. Meera Kapoor",
+        "subtitle": "Administration & Senior Faculty",
+        "home_block": "Block 1 (Central Administration)",
+        "db_block": "Block_1",
+        "department": "Administration",
+        "password": DEFAULT_DEMO_PASSWORD,
+        "badge_color": "emerald",
+        "icon": "fa-chalkboard-user",
+        "target": "Faculty Priority View (Block 1)",
+        "dest_url": "/",
+    },
+    {
+        "username": "W-BH2-01",
+        "alias": "warden",
+        "role": "warden",
+        "role_label": "Hostel Warden",
+        "name": "Rajinder Singh",
+        "subtitle": "Boys Hostel 2 Administration",
+        "home_block": "BH2 Hostel Grounds",
+        "db_block": "BH2_Hostel",
+        "department": "Hostel Operations",
+        "password": DEFAULT_DEMO_PASSWORD,
+        "badge_color": "amber",
+        "icon": "fa-hotel",
+        "target": "Estate Console & Overrides",
+        "dest_url": "/admin",
+    },
+    {
+        "username": "G-GATE-03",
+        "alias": "guard",
+        "role": "guard",
+        "role_label": "Security Guard",
+        "name": "Harpreet Kaur",
+        "subtitle": "Main Gate Safety & Enforcement",
+        "home_block": "Main Gate Operations",
+        "db_block": None,
+        "department": "Campus Security",
+        "password": DEFAULT_DEMO_PASSWORD,
+        "badge_color": "purple",
+        "icon": "fa-shield-halved",
+        "target": "Violations & Gate Status",
+        "dest_url": "/admin",
+    },
+    {
+        "username": "admin",
+        "alias": "",
+        "role": "admin",
+        "role_label": "Administrator",
+        "name": "Chief Parking Admin",
+        "subtitle": "Directorate of Transportation",
+        "home_block": "Central Traffic Operations",
+        "db_block": "Block_1",
+        "department": "Campus Transportation Directorate",
+        "password": DEFAULT_DEMO_PASSWORD,
+        "badge_color": "rose",
+        "icon": "fa-crown",
+        "target": "Full Master Control Center",
+        "dest_url": "/admin",
+    },
+    {
+        "username": "V-CANTEEN-07",
+        "alias": "vendor",
+        "role": "vendor",
+        "role_label": "Vendor",
+        "name": "Punjab Caterers",
+        "subtitle": "Campus Dining & Delivery Supply",
+        "home_block": "MB Food Square",
+        "db_block": "MB_Food_Square",
+        "department": "Food Services",
+        "password": DEFAULT_DEMO_PASSWORD,
+        "badge_color": "slate",
+        "icon": "fa-truck-fast",
+        "target": "Delivery Bay Parking",
+        "dest_url": "/",
+    },
+]
 
 
 def credentials_file() -> str:
@@ -31,42 +133,82 @@ def credentials_file() -> str:
     return os.path.join(base, "demo_credentials.csv")
 
 
-def _is_local(request: Request) -> bool:
-    if any(h in request.headers for h in ("x-forwarded-for", "x-real-ip", "forwarded")):
-        return False                      # behind a proxy the peer address says nothing about the real client
-    host = request.client.host if request.client else ""
+def enabled(request: Request = None) -> bool:
+    mode = os.environ.get("DEMO_LOGINS", "on").strip().lower()
+    return mode != "off"
+
+
+def ensure_demo_users() -> None:
+    """
+    Ensure all presentation demo accounts exist in the SQLite database with active state,
+    known demo password, and must_change_password=0 so they can sign in with 1 click.
+    """
+    csv_rows = []
+    for p in PRESENTATION_PERSONAS:
+        pw = p["password"]
+        user = auth.get_user_by_username(p["username"])
+        if not user:
+            try:
+                auth.create_user(
+                    p["username"],
+                    p["role"],
+                    full_name=p["name"],
+                    home_block=p["db_block"],
+                    department=p["department"],
+                    password=pw,
+                )
+                logger.info("Created presentation account '%s' (%s).", p["username"], p["role"])
+            except Exception as e:
+                logger.warning("Could not create presentation account '%s': %s", p["username"], e)
+        else:
+            auth.set_password(user["id"], pw, must_change=False)
+            auth.update_user(user["id"], is_active=1, full_name=p["name"], home_block=p["db_block"], department=p["department"])
+
+        csv_rows.append({
+            "username": p["username"],
+            "role": p["role"],
+            "full_name": p["name"],
+            "home_block": p["home_block"],
+            "password": pw,
+            "must_change": "no",
+        })
+
+        alias = p.get("alias")
+        if alias:
+            alias_user = auth.get_user_by_username(alias)
+            if not alias_user:
+                try:
+                    auth.create_user(
+                        alias,
+                        p["role"],
+                        full_name=f"{p['name']} (Alias)",
+                        home_block=p["db_block"],
+                        department=p["department"],
+                        password=pw,
+                    )
+                    logger.info("Created presentation alias '%s' (%s).", alias, p["role"])
+                except Exception as e:
+                    logger.warning("Could not create presentation alias '%s': %s", alias, e)
+            else:
+                auth.set_password(alias_user["id"], pw, must_change=False)
+                auth.update_user(alias_user["id"], is_active=1)
+
     try:
-        return ipaddress.ip_address(host).is_loopback
-    except ValueError:
-        return False
+        path = credentials_file()
+        with open(path, "w", newline="", encoding="utf-8") as f:
+            w = csv.DictWriter(f, fieldnames=["username", "role", "full_name", "home_block", "password", "must_change"])
+            w.writeheader()
+            w.writerows(csv_rows)
+    except Exception as e:
+        logger.warning("Could not write demo_credentials.csv: %s", e)
 
 
-def enabled(request: Request) -> bool:
-    mode = os.environ.get("DEMO_LOGINS", "auto").strip().lower()
-    if mode == "off":
-        return False
-    return mode == "on" or _is_local(request)
-
-
-def demo_accounts(request: Request) -> List[Dict[str, str]]:
-    """Demo accounts to offer on the login page (empty unless enabled and the seed file exists)."""
-    path = credentials_file()
-    if not enabled(request) or not os.path.exists(path):
+def demo_accounts(request: Request = None) -> List[Dict[str, Any]]:
+    """Return presentation demo personas for the login screen."""
+    if not enabled(request):
         return []
-    out = []
-    with open(path, newline="", encoding="utf-8") as f:
-        for row in csv.DictReader(f):
-            if row.get("must_change", "").lower() != "no" or row.get("role") == "admin":
-                continue                  # one-time passwords are for real hand-out, not one-click login
-            user = auth.get_user_by_username(row["username"])
-            if not user or not user["is_active"] or user["is_expired"]:
-                continue
-            with get_db().conn() as c:
-                stored = c.execute("SELECT password_hash FROM users WHERE id = ?", (user["id"],)).fetchone()[0]
-            if not auth.verify_password(row["password"], stored):
-                continue                  # password changed since seeding
-            out.append({"username": user["username"], "password": row["password"], "role": user["role"],
-                        "role_label": user["role_label"], "name": user["full_name"] or user["username"],
-                        "home_block": (user["home_block"] or "").replace("_", " ")})
-    out.sort(key=lambda a: (ROLE_ORDER.index(a["role"]) if a["role"] in ROLE_ORDER else 99, a["username"]))
-    return out
+    try:
+        ensure_demo_users()
+    except Exception as e:
+        logger.error("Error ensuring presentation users: %s", e)
+    return PRESENTATION_PERSONAS

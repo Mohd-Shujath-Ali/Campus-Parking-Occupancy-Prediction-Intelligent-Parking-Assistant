@@ -25,7 +25,7 @@ VENDOR_MAX_DAYS = 366
 
 
 def login_rate_limit() -> str:
-    return os.environ.get("LOGIN_RATE_LIMIT", "10/minute")
+    return os.environ.get("LOGIN_RATE_LIMIT", "60/minute")
 
 
 # ---------------------------------------------------------------------------
