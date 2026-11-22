@@ -24,8 +24,9 @@
     } else if (window.__API_BASE__) {
         defaultBase = window.__API_BASE__.replace(/\/+$/, '');
     } else if (host === 'localhost' || host === '127.0.0.1' || host === '') {
-        // Localhost: If running directly on port 8000 (FastAPI), use relative; otherwise default to port 8000
-        defaultBase = (port === '8000' || port === '') ? '' : 'http://127.0.0.1:8000';
+        // Localhost: If running directly on FastAPI (port 8000, 10000, etc.), use relative '';
+        // Only point to 127.0.0.1:8000 if accessed from a separate static dev server (e.g. port 3000, 5173, 5500)
+        defaultBase = (port === '8000' || port === '10000' || port === '' || !['3000', '5173', '5500'].includes(port)) ? '' : 'http://127.0.0.1:8000';
     } else {
         // Deployed on Render or any web domain:
         // Default to same origin (relative path '') so it connects to the active deployment!
@@ -45,7 +46,7 @@
         const cleaned = (newUrl || '').trim().replace(/\/+$/, '');
         if (!cleaned) {
             localStorage.removeItem(STORAGE_KEY);
-            window.API_BASE = (port === '8000' || host === 'localhost') ? '' : 'http://127.0.0.1:8000';
+            window.API_BASE = (port === '8000' || port === '10000' || host === 'localhost' || host === '127.0.0.1') ? '' : 'http://127.0.0.1:8000';
         } else {
             localStorage.setItem(STORAGE_KEY, cleaned);
             window.API_BASE = cleaned;

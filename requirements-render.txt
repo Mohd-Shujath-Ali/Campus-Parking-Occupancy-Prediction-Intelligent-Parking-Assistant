@@ -1,2 +1,29 @@
-# Render uses the same lean, pinned runtime set as requirements.txt.
--r requirements.txt
+# =============================================================================
+# Lightweight Runtime Dependencies for Render Free Tier (512 MB RAM limit)
+#
+# Strictly installs ONLY the core FastAPI web server and CPU-only ML packages
+# required for serving tabular XGBoost occupancy forecasts.
+#
+# Excludes:
+# - PyTorch, Torchvision, Ultralytics, OpenCV (saves ~1.8 GB disk & ~350 MB RAM;
+#   YOLO detection runs client-side in the browser via ONNX Runtime Web)
+# - Training & research tools: optuna, shap, matplotlib, seaborn, plotly, pytest
+# =============================================================================
+
+# Web framework & server
+fastapi==0.163.2
+starlette==1.7.0
+uvicorn==0.54.0
+pydantic==2.13.5
+jinja2==3.1.6
+python-multipart==0.0.32
+slowapi==0.1.10
+
+# Lean Data & ML inference runtime (CPU only)
+numpy==2.5.3
+pandas==3.0.5
+scipy==1.18.1
+scikit-learn==1.9.1
+xgboost-cpu==3.4.1
+joblib==1.6.0
+pyyaml==6.0.3

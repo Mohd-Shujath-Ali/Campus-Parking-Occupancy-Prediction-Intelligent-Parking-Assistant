@@ -1,0 +1,57 @@
+# =============================================================================
+# LPU Campus Parking Intelligence System - Dedicated Render Dockerfile
+#
+# Optimized for Render Free Tier (512 MB RAM limit) and Docker Hub deployment:
+#   docker build --platform linux/amd64 -f Dockerfile.render -t ali1131/campus-parking:latest .
+# =============================================================================
+ARG PYTHON_VERSION=3.13
+
+FROM python:${PYTHON_VERSION}-slim-bookworm
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    MPLCONFIGDIR=/tmp/matplotlib \
+    PORT=10000 \
+    FORWARDED_ALLOW_IPS=*
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgomp1 \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+RUN groupadd -r -g 1000 appgroup \
+    && useradd -r -u 1000 -g appgroup -d /home/appuser -m -s /bin/bash appuser \
+    && mkdir -p /tmp/matplotlib /app/data/live /var/data \
+    && chown -R appuser:appgroup /tmp/matplotlib /app /var/data
+
+# Install ONLY lightweight runtime requirements
+COPY requirements-render.txt ./
+RUN pip install --no-cache-dir -r requirements-render.txt
+
+# Copy required application modules and frontend assets
+COPY --chown=appuser:appgroup api/ ./api/
+COPY --chown=appuser:appgroup configs/ ./configs/
+COPY --chown=appuser:appgroup data_collection/ ./data_collection/
+COPY --chown=appuser:appgroup features/ ./features/
+COPY --chown=appuser:appgroup frontend/ ./frontend/
+COPY --chown=appuser:appgroup public/ ./public/
+COPY --chown=appuser:appgroup recommendation/ ./recommendation/
+COPY --chown=appuser:appgroup utils/ ./utils/
+COPY --chown=appuser:appgroup models/*.py ./models/
+COPY --chown=appuser:appgroup artifacts/pipelines/ ./artifacts/pipelines/
+
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN sed -i 's/\r$//' /usr/local/bin/docker-entrypoint.sh && chmod +x /usr/local/bin/docker-entrypoint.sh
+
+EXPOSE 10000
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=45s --retries=3 \
+    CMD curl -fsS "http://localhost:${PORT:-10000}/api/health" || exit 1
+
+ENTRYPOINT ["docker-entrypoint.sh"]
+
+CMD ["sh", "-c", "exec python -m uvicorn api.main:app --host 0.0.0.0 --port ${PORT:-10000} --workers 1"]

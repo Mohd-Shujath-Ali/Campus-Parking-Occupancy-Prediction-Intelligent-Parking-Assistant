@@ -1,11 +1,16 @@
-# Version control
+# =============================================================================
+# Dockerignore - Optimized for Lightweight Render Free Tier Build (< 500 MB)
+# =============================================================================
+
+# Version control & deploy configs
 .git/
 .gitignore
 .gitattributes
+.vercelignore
+vercel.json
 
-# Local state and SECRETS: accounts database, demo passwords, the admin one-time password, camera counts.
-# `COPY data/` would otherwise bake all of it into the image.
-data/live/
+# Local state & secrets (never bake into images)
+data/
 **/*.db
 **/*.db-wal
 **/*.db-shm
@@ -14,7 +19,7 @@ data/live/
 .env
 .env.*
 
-# Python artifacts
+# Python caches & build artifacts
 __pycache__/
 *.py[cod]
 *$py.class
@@ -26,13 +31,13 @@ htmlcov/
 dist/
 build/
 
-# Environments
+# Virtual environments
 .venv/
 venv/
 ENV/
 env/
 
-# IDE & OS
+# IDE & OS temporary files
 .idea/
 .vscode/
 *.swp
@@ -40,16 +45,35 @@ env/
 .DS_Store
 Thumbs.db
 
-# Not needed at runtime
-tests/
+# Heavy training backups & notebooks (saves ~400 MB)
+collab_content_backup/
 notebooks/
+.ipynb_checkpoints/
+Untitled*.ipynb
+
+# Heavy PyTorch / YOLO weights (saves ~106 MB; YOLO runs in browser via ONNX)
+models/weights/
+*.pt
+
+# Heavy / redundant artifacts not loaded at runtime (saves ~50 MB)
+artifacts/archive/
+artifacts/pipelines/boosters/
+artifacts/figures/
+artifacts/*.pptx
+artifacts/*.png
+
+# Offline development, training & evaluation scripts (not used by API)
+tests/
 experiments/
 docs/
-.ipynb_checkpoints/
-Untitled0.ipynb
+data_pipeline/
+evaluation/
+explainability/
+scripts/
 frontend_dist/
-artifacts/archive/
 *.md
 
-# YOLO dataset and training runs (hundreds of MB; the app never reads them). Weights live in models/weights.
-collab_content_backup/
+# Docker-specific local files
+docker-compose*.yml
+docker-start.*
+Dockerfile.gpu

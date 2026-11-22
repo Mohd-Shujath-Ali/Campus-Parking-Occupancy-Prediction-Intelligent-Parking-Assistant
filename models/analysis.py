@@ -4,6 +4,8 @@ Zone-Level Analysis and Heatmaps (core modules 6 and 9).
 Computed from the historical occupancy table (data/processed/lpu_timeseries.csv, currently
 SIMULATED; swap the path for an export of real observations once collected).
 """
+import os
+import logging
 from functools import lru_cache
 from typing import Dict, List, Optional
 
@@ -12,12 +14,17 @@ import pandas as pd
 
 from utils.config import load_zones_config
 
+logger = logging.getLogger(__name__)
+
 HIST_PATH = "data/processed/lpu_timeseries.csv"
 DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 
 
 @lru_cache(maxsize=1)
 def history() -> pd.DataFrame:
+    if not os.path.exists(HIST_PATH):
+        logger.warning("Historical timeseries (%s) not found. Running in lean mode without historical analytics.", HIST_PATH)
+        return pd.DataFrame(columns=["timestamp", "zone_id", "vehicle_count", "operational_capacity", "occ", "hour", "dow", "weekend", "date"])
     df = pd.read_csv(HIST_PATH, usecols=["timestamp", "zone_id", "vehicle_count", "operational_capacity"],
                      parse_dates=["timestamp"])
     df["occ"] = df.vehicle_count / df.operational_capacity
@@ -77,6 +84,12 @@ def zone_analysis(zone_id: str) -> Dict:
 def heatmap(kind: str, zone_id: Optional[str] = None, day_type: str = "weekday") -> Dict:
     h = history()
     if kind == "zone_hour":
+        if h.empty:
+            names = {z["id"]: z["name"] for z in load_zones_config()["zones"]}
+            order = list(names.keys())
+            return {"kind": kind, "day_type": day_type, "rows": [names[z] for z in order],
+                    "row_ids": order, "cols": list(range(24)),
+                    "values": [[0.0] * 24 for _ in order], "data_source": "none"}
         d = h[h.weekend] if day_type == "weekend" else h[~h.weekend]
         pv = d.pivot_table(index="zone_id", columns="hour", values="occ", aggfunc="mean")
         pv = pv.reindex(columns=range(24)).fillna(0)
