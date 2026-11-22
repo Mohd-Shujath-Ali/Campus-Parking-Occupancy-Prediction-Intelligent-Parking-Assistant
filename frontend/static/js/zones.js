@@ -21,6 +21,13 @@ async function loadHeatmapSnapshot() {
         }
 
         renderHeatmapGrid(data.zones || []);
+        const note = document.getElementById('dataModeNote');
+        if (note) {
+            const msg = { demo: 'Demo data: no camera has reported yet, so these counts are simulated.',
+                          estimated: 'No live camera counts right now: showing normal-day estimates.' }[data.data_mode];
+            note.textContent = msg || '';
+            note.classList.toggle('hidden', !msg);
+        }
     } catch (err) {
         if (grid) {
             grid.innerHTML = `<div class="col-span-full py-3 text-center text-xs text-rose-500">Failed to load real-time heatmap: ${err.message}</div>`;
@@ -38,7 +45,9 @@ function renderHeatmapGrid(zones) {
     }
 
     grid.innerHTML = zones.map(z => {
-        const occRate = z.occupancy_rate !== undefined ? z.occupancy_rate : (z.predicted_vehicle_count / z.operational_capacity);
+        // What is parked now (live camera, or labelled demo / estimate), not the forecast
+        const nowCount = z.current_count !== undefined ? z.current_count : z.predicted_vehicle_count;
+        const occRate = z.current_occupancy_rate !== undefined ? z.current_occupancy_rate : (nowCount / z.operational_capacity);
         const occPct = Math.round(occRate * 100);
         
         let colorClass = 'border-emerald-300 bg-emerald-50/60 text-emerald-800';
@@ -58,10 +67,15 @@ function renderHeatmapGrid(zones) {
             statusText = 'Moderate';
         }
 
-        if (z.camera_status === 'offline') {
+        if (z.camera_status === 'offline') {          // no usable camera count: this is the normal-day estimate
             colorClass = 'border-slate-300 bg-slate-50 text-slate-600';
             badgeColor = 'bg-slate-200 text-slate-600';
-            statusText = 'Offline';
+            statusText = 'Estimate';
+        } else if (z.camera_status === 'stale') {
+            badgeColor = 'bg-amber-100 text-amber-800';
+            statusText = 'Stale';
+        } else if (z.camera_status === 'demo') {
+            statusText = statusText + ' · demo';
         }
 
         return `
@@ -74,7 +88,7 @@ function renderHeatmapGrid(zones) {
             <div class="my-2">
                 <div class="flex items-baseline justify-between">
                     <span class="text-lg font-black">${occPct}%</span>
-                    <span class="text-[10px] font-mono opacity-80">${z.predicted_vehicle_count}/${z.operational_capacity}</span>
+                    <span class="text-[10px] font-mono opacity-80">${nowCount}/${z.operational_capacity}</span>
                 </div>
                 <div class="w-full bg-slate-200/80 rounded-full h-1.5 mt-1 overflow-hidden">
                     <div class="${barColor} h-1.5 rounded-full transition-all duration-500" style="width: ${Math.min(100, occPct)}%"></div>

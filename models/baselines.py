@@ -16,6 +16,23 @@ class PersistenceForecaster:
         return X["vehicle_count"].values
 
 
+class ProfileForecaster:
+    """
+    Normal-day baseline: y_hat(t+H) = profile(zone, time of week at t+H) x capacity.
+    Uses no live data at all, so it is also the fallback when a camera is stale or offline.
+    """
+
+    def __init__(self, horizon_key: str = "H15"):
+        self.horizon_key = horizon_key
+
+    def fit(self, X: pd.DataFrame, y: pd.Series):
+        return self
+
+    def predict(self, X: pd.DataFrame) -> np.ndarray:
+        from models.forecaster import profile_offset
+        return profile_offset(X, self.horizon_key)
+
+
 def _hour_day(df: pd.DataFrame) -> Tuple[np.ndarray, np.ndarray]:
     """Recover integer hour-of-day / day-of-week from the sin/cos encodings."""
     hour = np.round((np.arctan2(df["hour_sin"], df["hour_cos"]) / (2 * np.pi) * 24) % 24).astype(int) % 24

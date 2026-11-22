@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+
+{% block title %}My Account — LPU Smart Parking{% endblock %}
+
+{% block content %}
+<section class="max-w-4xl mx-auto space-y-6">
+    {% if user.must_change_password %}
+    <div class="bg-amber-50 border border-amber-300 text-amber-900 rounded-2xl p-4 flex items-start space-x-3">
+        <i class="fa-solid fa-key text-amber-500 mt-0.5"></i>
+        <div class="text-sm">
+            <p class="font-bold">Set your own password to continue</p>
+            <p class="text-amber-800">You signed in with a one-time password. Choose a new one below; the rest of the system unlocks once it is saved.</p>
+        </div>
+    </div>
+    {% endif %}
+
+    <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col sm:flex-row sm:items-center gap-4">
+        <span class="w-14 h-14 rounded-2xl bg-slate-900 text-white text-xl font-black flex items-center justify-center shrink-0">{{ (user.full_name or user.username)[:1] | upper }}</span>
+        <div class="flex-1 min-w-0">
+            <h2 class="text-xl font-black text-slate-900 truncate">{{ user.full_name or user.username }}</h2>
+            <p class="text-sm text-slate-500">User ID <span class="font-mono font-bold text-slate-700">{{ user.username }}</span>{% if user.department %} · {{ user.department }}{% endif %}</p>
+        </div>
+        <div class="flex flex-wrap gap-2">
+            <span class="text-xs font-bold uppercase tracking-wider px-3 py-1 rounded-full bg-orange-50 text-orange-700 border border-orange-200">{{ user.role_label }}</span>
+            {% if user.expires_at %}
+            <span class="text-xs font-semibold px-3 py-1 rounded-full bg-slate-100 text-slate-600 border border-slate-200" data-expiry="{{ user.expires_at }}">Valid until …</span>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <!-- Home block -->
+        <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+            <div>
+                <h3 class="text-base font-bold text-slate-900 flex items-center space-x-2"><i class="fa-solid fa-building-columns text-orange-600"></i><span>Home block</span></h3>
+                <p class="text-xs text-slate-500 mt-1">Parking recommendations start from this block. If it has no measured distances of its own, the adjacent reference block is used.</p>
+            </div>
+            <div>
+                <label for="homeBlockSelect" class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">Block</label>
+                <select id="homeBlockSelect" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-sm font-medium focus:ring-2 focus:ring-orange-500 focus:outline-none">
+                    <option value="">Loading blocks…</option>
+                </select>
+                <p id="anchorHint" class="text-[11px] text-slate-500 mt-1.5"></p>
+            </div>
+            <button id="saveBlockBtn" class="w-full bg-slate-900 hover:bg-orange-600 text-white font-bold py-2.5 rounded-xl text-sm transition-all">Save home block</button>
+        </div>
+
+        <!-- Password -->
+        <form id="pwForm" class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4" novalidate>
+            <div>
+                <h3 class="text-base font-bold text-slate-900 flex items-center space-x-2"><i class="fa-solid fa-lock text-orange-600"></i><span>Change password</span></h3>
+                <p class="text-xs text-slate-500 mt-1">At least {{ 12 if user.role == 'admin' else 8 }} characters with a letter and a digit, and not containing your user ID. Other signed-in devices are signed out.</p>
+            </div>
+            <input type="text" autocomplete="username" value="{{ user.username }}" class="hidden" readonly>
+            <div>
+                <label for="curPw" class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">{{ 'One-time password' if user.must_change_password else 'Current password' }}</label>
+                <input id="curPw" type="password" autocomplete="current-password" required class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none">
+            </div>
+            <div>
+                <label for="newPw" class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">New password</label>
+                <input id="newPw" type="password" autocomplete="new-password" required minlength="{{ 12 if user.role == 'admin' else 8 }}" class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none">
+            </div>
+            <div>
+                <label for="newPw2" class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">Confirm new password</label>
+                <input id="newPw2" type="password" autocomplete="new-password" required class="w-full bg-slate-50 border border-slate-300 rounded-xl px-3 py-2.5 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none">
+            </div>
+            <div id="pwError" class="hidden text-sm bg-rose-50 border border-rose-200 text-rose-800 rounded-xl px-3 py-2" role="alert"></div>
+            <button type="submit" id="pwBtn" class="w-full bg-orange-600 hover:bg-orange-700 disabled:opacity-60 text-white font-bold py-2.5 rounded-xl text-sm transition-all">Update password</button>
+        </form>
+    </div>
+</section>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="/static/js/account.js"></script>
+{% endblock %}

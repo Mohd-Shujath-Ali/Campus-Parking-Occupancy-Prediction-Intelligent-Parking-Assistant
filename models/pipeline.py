@@ -12,18 +12,19 @@ from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
-from features.feature_pipeline import FEATURE_COLS, zone_order
+from features.feature_pipeline import FEATURE_COLS, HORIZONS, horizon_col, zone_order
 
 CATEGORICAL = ["zone_code"]
 SCALED = [
     "vehicle_count", "operational_capacity", "occupancy_ratio",
     "lag_15m", "lag_30m", "lag_45m", "lag_60m", "delta_15m", "delta_30m",
     "rolling_mean_30m", "rolling_std_30m", "rolling_mean_60m", "rolling_std_60m",
-]
+    "profile_now", "profile_dev",
+] + [horizon_col(h, f) for h in HORIZONS for f in ("profile", "mins_to_bell")]
 PASSTHROUGH = [
-    "hour_sin", "hour_cos", "day_sin", "day_cos", "is_weekend",
-    "is_exam_day", "is_campus_event", "is_class_transition",
-]
+    "hour_sin", "hour_cos", "day_sin", "day_cos", "is_weekend", "is_holiday",
+    "is_exam_day", "is_campus_event", "event_load", "is_class_transition",
+] + [horizon_col(h, f) for h in HORIZONS for f in ("event_load", "is_exam_day", "is_holiday")]
 assert sorted(CATEGORICAL + SCALED + PASSTHROUGH) == sorted(FEATURE_COLS)
 
 

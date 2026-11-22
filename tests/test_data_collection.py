@@ -7,6 +7,7 @@ import api.routes as routes
 from api.main import app
 from data_collection.store import ObservationStore, export_training_frame, floor_bucket
 from models.history import ZoneHistory
+from tests.auth_helpers import login_client
 
 T = datetime(2026, 11, 16, 10, 2, 41)  # a Monday, 10:02
 
@@ -37,18 +38,18 @@ def test_export_matches_training_schema(tmp_path):
     assert out.is_class_transition.tolist() == [1, 1, 1, 1]  # 8:45-9:00 is inside the 8:45 bell window
 
 
-def _client(tmp_store, monkeypatch, key=None):
+def _client(tmp_store, monkeypatch, key=None, as_admin=False):
     monkeypatch.setattr(routes, "_store", tmp_store)
     monkeypatch.setattr(routes, "HISTORY", ZoneHistory())
     if key:
         monkeypatch.setenv("INGEST_API_KEY", key)
     else:
         monkeypatch.delenv("INGEST_API_KEY", raising=False)
-    return TestClient(app)
+    return login_client() if as_admin else TestClient(app)
 
 
 def test_ingest_endpoint_feeds_history(monkeypatch):
-    c = _client(ObservationStore(":memory:"), monkeypatch)
+    c = _client(ObservationStore(":memory:"), monkeypatch, as_admin=True)
     r = c.post("/api/ingest", json={"zone_id": "ZONE_BLOCK1", "count": 55,
                                     "timestamp": "2026-11-16T10:00:00"})
     assert r.status_code == 200 and r.json()["zone_total"] == 55

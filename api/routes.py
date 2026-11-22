@@ -5,24 +5,32 @@ No hardcoded heuristics remain in production paths.
 """
 
 import os
+import hmac
 import json
 import yaml
 import logging
 import pandas as pd
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
-from fastapi import APIRouter, HTTPException, Query, UploadFile, File, Form, Request
+from fastapi import APIRouter, HTTPException, Query, UploadFile, File, Form, Request, Depends
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse, FileResponse
 from typing import List, Dict, Any, Optional
 
 from fastapi import Header
+from api import auth, calendar_store
+from api.auth import require
 from api.limiter import limiter
+from api.ops_routes import active_overrides
+from features import calendar as cal
+from recommendation.campus_blocks import get_campus_blocks
+from utils.config import load_model_config
 from api.schemas import (PredictionRequest, PredictionResponse, RecommendationResponse, ZoneRankItem,
                          IngestRequest, NavigateRequest)
 from data_collection.store import ObservationStore, DEFAULT_DB
 from recommendation.parking_ranker import ParkingRanker
-from models.inference import predict_zone, predict_all_zones, models_ready, _build_feature_row
+from models.inference import predict_zone, models_ready, model_meta, _build_feature_row
+from models import live
 from models.history import HISTORY
 from models import analysis as zone_analytics
 from models.demand import summarise_days
@@ -59,8 +67,11 @@ def get_health():
         "forecast_horizons_minutes": [15, 30, 60],
         "ml_model": {
             "xgboost_loaded": ml_status["loaded"],
-            "error": ml_status["error"]
+            "error": ml_status["error"],
+            "version": model_meta().get("version"),
+            "trained_on": model_meta().get("data_source"),   # synthetic | live | mixed
         },
+        "data_mode": live.data_mode(ZONES_MAP)["mode"],      # demo | live | estimated
         "yolo_model": cv_status,
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
@@ -70,7 +81,7 @@ def get_health():
 # Zone Catalogue
 # ---------------------------------------------------------------------------
 
-@router.get("/zones")
+@router.get("/zones", dependencies=[Depends(require("view_occupancy"))])
 def list_zones():
     result = []
     for z_id, z in ZONES_MAP.items():
@@ -90,7 +101,7 @@ def list_zones():
 # Real ML Prediction (single zone)
 # ---------------------------------------------------------------------------
 
-@router.post("/predict", response_model=PredictionResponse)
+@router.post("/predict", response_model=PredictionResponse, dependencies=[Depends(require("view_occupancy"))])
 def predict_occupancy(req: PredictionRequest):
     if req.zone_id not in ZONES_MAP:
         raise HTTPException(
@@ -98,10 +109,10 @@ def predict_occupancy(req: PredictionRequest):
             detail=f"Zone '{req.zone_id}' not found. Valid zones: {list(ZONES_MAP.keys())}"
         )
 
-    if req.horizon_minutes not in (15, 30, 60):
+    if not 5 <= req.horizon_minutes <= 60:
         raise HTTPException(
             status_code=422,
-            detail="horizon_minutes must be 15, 30, or 60."
+            detail="horizon_minutes must be between 5 and 60 (interpolated between the trained 15/30/60 horizons)."
         )
 
     if req.current_count < 0:
@@ -133,6 +144,7 @@ def predict_occupancy(req: PredictionRequest):
     )
 
     confidence = "HIGH_CONFIDENCE_ML" if result["inference_source"] == "xgboost_model" else "HEURISTIC_FALLBACK"
+    # (HEURISTIC_FALLBACK now means the normal-day profile, used only when no trained model is loaded)
 
     return PredictionResponse(
         zone_id=req.zone_id,
@@ -145,6 +157,7 @@ def predict_occupancy(req: PredictionRequest):
         available_spaces=result["available_spaces"],
         occupancy_rate=result["occupancy_rate"],
         saturation_probability=result["saturation_probability"],
+        p_free=result["p_free"],
         status=result["status"],
         confidence_level=confidence,
         lag_source=result.get("lag_source", "estimated"),
@@ -167,16 +180,20 @@ def get_store() -> ObservationStore:
 
 
 @router.post("/ingest")
-def ingest_observation(req: IngestRequest, x_api_key: Optional[str] = Header(None)):
+def ingest_observation(req: IngestRequest, request: Request, x_api_key: Optional[str] = Header(None)):
     """
     Store one camera's vehicle count. The zone total for the 5-minute bucket is the sum over
     all cameras reporting for that zone, and it is pushed into the rolling history so the next
     forecast uses real lags (`lag_source: observed`).
-    If INGEST_API_KEY is set, the caller must send it in the `X-API-Key` header.
+    Callers authenticate either with the `X-API-Key` header (camera devices; the key is set in
+    INGEST_API_KEY) or with a logged-in admin session (camera_control).
     """
     required = os.environ.get("INGEST_API_KEY")
-    if required and x_api_key != required:
-        raise HTTPException(status_code=401, detail="Invalid or missing X-API-Key.")
+    if x_api_key is not None:
+        if not required or not hmac.compare_digest(x_api_key, required):
+            raise HTTPException(status_code=401, detail="Invalid X-API-Key.")
+    else:
+        require("camera_control")(request)
     if req.zone_id not in ZONES_MAP:
         raise HTTPException(status_code=404, detail=f"Zone '{req.zone_id}' not found.")
     try:
@@ -186,6 +203,7 @@ def ingest_observation(req: IngestRequest, x_api_key: Optional[str] = Header(Non
     cam = req.camera_id or ZONES_MAP[req.zone_id]["camera_id"]
     res = get_store().record(req.zone_id, cam, req.count, ts, req.source)
     HISTORY.record(req.zone_id, res["bucket"], res["zone_total"])
+    live.note_real_data()          # from now on this campus is on real data: no demo feed, fresh forecasts
     cap = ZONES_MAP[req.zone_id]["operational_capacity"]
     return {"zone_id": req.zone_id, "bucket": res["bucket"].isoformat(),
             "zone_total": res["zone_total"], "cameras_reporting": res["cameras_reporting"],
@@ -193,7 +211,7 @@ def ingest_observation(req: IngestRequest, x_api_key: Optional[str] = Header(Non
             "over_capacity": res["zone_total"] > cap}
 
 
-@router.get("/observations/stats")
+@router.get("/observations/stats", dependencies=[Depends(require("camera_control"))])
 def observation_stats():
     """How much real data has been collected so far."""
     return get_store().stats()
@@ -230,17 +248,19 @@ def _parse_dates(raw: Optional[str], name: str):
     return out
 
 
-@router.get("/demand-forecast")
+@router.get("/demand-forecast", dependencies=[Depends(require("view_analytics"))])
 def demand_forecast(
     days: int = Query(7, ge=1, le=14, description="Days ahead"),
     start: Optional[str] = Query(None, description="First day (YYYY-MM-DD, default today IST)"),
     zone_id: Optional[str] = Query(None),
     exam_dates: Optional[str] = Query(None, description="Comma-separated dates to treat as exam days (what-if)"),
     event_dates: Optional[str] = Query(None, description="Comma-separated dates with a campus event (what-if)"),
+    holiday_dates: Optional[str] = Query(None, description="Comma-separated dates to treat as holidays (what-if)"),
 ):
     """
     Calendar-based demand outlook: expected peak time and level, hours above 90% and the
-    24-hour profile for every zone and day. Use exam_dates/event_dates for scenario planning.
+    24-hour profile for every zone and day. The campus calendar (exam windows, holidays and events with
+    their venue and expected vehicles) is applied automatically; the *_dates arguments add what-if days.
     """
     if zone_id and zone_id not in ZONES_MAP:
         raise HTTPException(status_code=404, detail=f"Zone '{zone_id}' not found.")
@@ -249,18 +269,24 @@ def demand_forecast(
     except ValueError:
         raise HTTPException(status_code=422, detail="start must be YYYY-MM-DD.")
     exam, event = _parse_dates(exam_dates, "exam_dates"), _parse_dates(event_dates, "event_dates")
+    hol = _parse_dates(holiday_dates, "holiday_dates")
+    window_start = datetime.combine(first, datetime.min.time())
+    entries = calendar_store.entries_between(window_start, window_start + timedelta(days=days))
     grid = _get_demand_model().forecast_grid(first, days, exam_dates=exam, event_dates=event,
-                                             zone_ids=[zone_id] if zone_id else None)
+                                             zone_ids=[zone_id] if zone_id else None,
+                                             holiday_dates=hol, entries=entries)
     rows = summarise_days(grid)
     for r in rows:
         r["zone_name"] = ZONES_MAP[r["zone_id"]]["name"]
     return {"start": first.isoformat(), "days": days, "zone_id": zone_id,
             "scenario": {"exam_dates": sorted(d.isoformat() for d in exam),
-                         "event_dates": sorted(d.isoformat() for d in event)},
+                         "event_dates": sorted(d.isoformat() for d in event),
+                         "holiday_dates": sorted(d.isoformat() for d in hol)},
+            "calendar_entries_applied": [calendar_store.to_dict(e) for e in entries],
             "forecast": rows}
 
 
-@router.get("/zone-analysis/{zone_id}")
+@router.get("/zone-analysis/{zone_id}", dependencies=[Depends(require("view_occupancy"))])
 def get_zone_analysis(zone_id: str):
     """Historical behaviour of one zone: profiles, peak, fill/drain times, saturation share."""
     if zone_id not in ZONES_MAP:
@@ -271,7 +297,7 @@ def get_zone_analysis(zone_id: str):
     return out
 
 
-@router.get("/heatmap")
+@router.get("/heatmap", dependencies=[Depends(require("view_analytics"))])
 def get_heatmap(
     kind: str = Query("zone_hour", description="zone_hour | zone_week | forecast"),
     zone_id: Optional[str] = Query(None),
@@ -299,13 +325,13 @@ def get_heatmap(
 # Explainability — SHAP breakdown of a single prediction
 # ---------------------------------------------------------------------------
 
-@router.get("/explain")
+@router.get("/explain", dependencies=[Depends(require("view_analytics"))])
 def explain_prediction(
     zone_id: str = Query(..., description="Zone to explain, e.g. ZONE_BLOCK1"),
     current_count: int = Query(..., ge=0),
     horizon_minutes: int = Query(15),
-    is_exam_day: bool = Query(False),
-    is_class_transition: bool = Query(False),
+    is_exam_day: Optional[bool] = Query(None),
+    is_class_transition: Optional[bool] = Query(None),
 ):
     """
     Why did the model predict this? Returns the additive SHAP decomposition:
@@ -335,29 +361,45 @@ def explain_prediction(
 
 @router.get("/recommendations", response_model=RecommendationResponse)
 def get_recommendations(
-    destination: str = Query("Block_26_CSE", description="Campus destination block"),
-    horizon_minutes: int = Query(15, ge=1, le=120, description="Arrival horizon (minutes)"),
-    is_exam_day: bool = Query(False),
-    is_class_transition: bool = Query(False),
+    destination: Optional[str] = Query(None, description="Campus block you are heading to. Defaults to your home block."),
+    horizon_minutes: int = Query(15, ge=1, le=120, description="Minutes until you arrive"),
+    arrive_at: Optional[str] = Query(None, description="Arrival clock time HH:MM (next occurrence, campus time) or "
+                                                       "YYYY-MM-DDTHH:MM; overrides horizon_minutes"),
+    is_exam_day: Optional[bool] = Query(None, description="What-if override; omit to use the campus calendar"),
+    is_class_transition: Optional[bool] = Query(None, description="What-if override; omit to use the bell schedule"),
+    user: Dict[str, Any] = Depends(require("recommend")),
 ):
-    valid_dests = _get_valid_destinations()
-    norm_map = {d.lower().replace(" ", "_"): d for d in valid_dests}
-    req_norm = destination.strip().lower().replace(" ", "_")
-    if req_norm in norm_map:
-        destination = norm_map[req_norm]
-    elif destination not in valid_dests:
+    """
+    Nearest-parking recommendations. Without `destination`, ranking starts from the caller's
+    home block. A block that has no measured distances of its own is ranked from the adjacent
+    reference block (configs/campus_blocks.yaml). Grounds a warden marked CLOSED or FULL are
+    listed last and never suggested.
+    """
+    blocks = get_campus_blocks()
+    if destination and destination.strip():
+        requested, source = destination.strip(), "selected"
+    elif user.get("home_block"):
+        requested, source = user["home_block"], "home_block"
+    else:
+        raise HTTPException(
+            status_code=422,
+            detail="No destination given and no home block on your profile. "
+                   "Pick a destination, or set your home block on the Account page.")
+    block = blocks.get(requested)
+    if block is None:
         raise HTTPException(
             status_code=404,
-            detail=f"Unknown destination '{destination}'. Valid: {valid_dests}"
-        )
+            detail=f"Unknown destination '{requested}'. Valid: {[b['id'] for b in blocks.all()]}")
+    destination = block["anchor"]
 
     now = datetime.now(_IST)
-    all_preds = predict_all_zones(
-        ZONES_MAP,
-        is_exam_day=is_exam_day,
-        is_class_transition=is_class_transition,
-        timestamp=now,
-    )
+    now_naive = now.replace(tzinfo=None)
+    if arrive_at:
+        arrival, horizon_minutes = resolve_arrival(arrive_at, now_naive)
+    else:
+        arrival = now_naive + timedelta(minutes=horizon_minutes)
+    all_preds = live.predict_all(ZONES_MAP, now_naive, horizon_minutes, is_exam_day, is_class_transition)
+    overrides = active_overrides()
 
     # Map predictions into the format ParkingRanker expects
     pred_input = {}
@@ -368,24 +410,103 @@ def get_recommendations(
             "occupancy_rate":    p["occupancy_rate"],
             "saturation_prob":   p["saturation_probability"],
             "camera_age_seconds": p.get("camera_age_seconds", 30.0),
+            "p_free":            p["p_free"] if p["inference_source"] == "xgboost_model" else None,
+            "confidence":        p["confidence"],
+            "count_source":      p["count_source"],
+            "predicted_low":     p["predicted_low"],
+            "predicted_high":    p["predicted_high"],
+            "forecast_basis":    p["forecast_basis"],
         }
+        if z_id in overrides:   # closed / full grounds rank as saturated
+            cap = ZONES_MAP[z_id]["operational_capacity"]
+            pred_input[z_id].update(predicted_count=cap, available_spaces=0, occupancy_rate=1.0, saturation_prob=1.0,
+                                    p_free=0.0)
 
-    ranked = ranker.rank_zones(destination, pred_input, horizon_minutes=min(horizon_minutes, 60))
+    ranked = ranker.rank_zones(destination, pred_input, horizon_minutes=horizon_minutes)
+    if overrides:
+        usable, blocked = [], []
+        for z in ranked:
+            o = overrides.get(z["zone_id"])
+            if o:
+                z.update(status=o["status"], available_spaces=0, score=0.0,
+                         override_reason=o.get("reason") or f"Marked {o['status'].lower()} by {o['set_by']}")
+                blocked.append(z)
+            else:
+                usable.append(z)
+        ranked = usable + blocked
 
-    hour = now.hour
-    is_peak = (8 <= hour <= 10) or (11 <= hour <= 14) or (16 <= hour <= 18)
-    tip = None
-    if ranked and ranked[0]["status"] != "AVAILABLE":
-        tip = "Smart Arrival Tip: Arriving 15 minutes after peak bell hour reduces congestion by ~22%."
-    elif is_peak and ranked:
-        tip = f"Peak hour detected ({hour:02d}:00). Lecture surge mode active — plan parking in advance."
+    tip = _arrival_tip(ranked, horizon_minutes, now_naive, is_exam_day, is_class_transition)
+    bases = {p["forecast_basis"] for p in all_preds.values()}
 
     return RecommendationResponse(
         destination=destination,
         horizon_minutes=horizon_minutes,
         recommended_zones=ranked,
-        counterfactual_tip=tip
+        counterfactual_tip=tip,
+        requested_block=block["id"],
+        requested_block_name=block["name"],
+        destination_source=source,
+        uses_adjacent_block=not block["is_reference"],
+        data_mode=live.data_mode(ZONES_MAP)["mode"],
+        # conditions at the ARRIVAL time: that is what the forecast is about
+        conditions=cal.context_at(arrival, calendar_store.list_entries()),
+        arrival_time=arrival.isoformat(timespec="minutes"),
+        forecast_basis="calendar" if bases == {"calendar"} else "live" if bases == {"live"} else "blended",
     )
+
+
+def resolve_arrival(arrive_at: str, now: datetime):
+    """'HH:MM' -> next occurrence (today, or tomorrow if already past); ISO date-time -> as given. Returns (arrival, minutes)."""
+    v = arrive_at.strip()
+    max_days = load_model_config()["live"]["max_arrival_days"]
+    try:
+        if len(v) <= 5 and ":" in v:
+            hh, mm = (int(x) for x in v.split(":"))
+            arrival = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
+            if arrival <= now + timedelta(minutes=1):
+                arrival += timedelta(days=1)
+        else:
+            arrival = datetime.fromisoformat(v)
+            arrival = arrival.astimezone(_IST).replace(tzinfo=None) if arrival.tzinfo else arrival
+    except ValueError:
+        raise HTTPException(status_code=422, detail="arrive_at must be HH:MM or YYYY-MM-DDTHH:MM.")
+    if arrival <= now:
+        raise HTTPException(status_code=422, detail="arrive_at is in the past.")
+    if arrival > now + timedelta(days=max_days):
+        raise HTTPException(status_code=422, detail=f"arrive_at can be at most {max_days} days ahead.")
+    return arrival, max(1, int(round((arrival - now).total_seconds() / 60)))
+
+
+def _arrival_tip(ranked, horizon_minutes, now, is_exam_day, is_class_transition) -> Optional[str]:
+    """
+    A tip computed from the forecast itself (no canned claims): if the best ground is unlikely to have
+    space, how much later arrival helps; otherwise any campus event or exam affecting the grounds.
+    """
+    usable = [z for z in ranked if z["status"] not in ("CLOSED", "FULL")]
+    if not usable:
+        return "Every ground is currently closed or full. Check with the parking office."
+    best = usable[0]
+    if best.get("p_free") is not None and best["p_free"] < 0.7:
+        base = best["p_free"]
+        for extra in (15, 30, 45, 60):
+            later = live.predict_all(ZONES_MAP, None, horizon_minutes + extra, is_exam_day, is_class_transition)
+            p_later = later[best["zone_id"]]["p_free"]
+            if p_later >= base + 0.15 and p_later >= 0.6:
+                return (f"{best['name']} has a {round(100 * base)}% chance of a free slot if you arrive in "
+                        f"{horizon_minutes} min; arriving about {extra} min later raises that to {round(100 * p_later)}%.")
+        if base < 0.35:
+            return (f"All nearby grounds are likely to be busy at that time; {best['name']} is your best chance "
+                    f"({round(100 * base)}% for a free slot). Leave earlier or allow extra walking time.")
+    ctx = cal.context_at(now, calendar_store.list_entries())
+    if ctx["events_now"]:
+        e = ctx["events_now"][0]
+        return f"Campus event on: {e['name']}. Grounds near {str(e['venue_block']).replace('_', ' ')} are busier than usual."
+    if ctx["events_soon"]:
+        e = ctx["events_soon"][0]
+        return f"{e['name']} starts soon near {str(e['venue_block']).replace('_', ' ')}; nearby grounds will fill up."
+    if ctx["exam_day"]:
+        return "Exam day: academic-block grounds fill earlier than usual."
+    return None
 
 
 def _get_valid_destinations():
@@ -401,13 +522,17 @@ def _get_valid_destinations():
 
 @router.post("/navigate")
 @limiter.limit("30/minute")
-def record_driver_navigation(request: Request, req: NavigateRequest):
+def record_driver_navigation(request: Request, req: NavigateRequest, user: Dict[str, Any] = Depends(require("recommend"))):
     """
     Registers a driver dispatching towards a specific parking zone.
     Updates the InFlightDispatchTracker to proactively prevent congestion herd collapse.
     """
     if req.zone_id not in ZONES_MAP:
         raise HTTPException(status_code=404, detail="Zone not found.")
+    o = active_overrides().get(req.zone_id)
+    if o:
+        raise HTTPException(status_code=409, detail=f"{ZONES_MAP[req.zone_id]['name']} is marked {o['status'].lower()}"
+                                                    f"{': ' + o['reason'] if o.get('reason') else ''}. Pick another ground.")
     cap = ZONES_MAP[req.zone_id]["operational_capacity"]
     active_count = ranker.dispatch_tracker.record_dispatch(req.zone_id, max_capacity=cap)
     return {
@@ -422,33 +547,33 @@ def record_driver_navigation(request: Request, req: NavigateRequest):
 # Real-Time Campus Snapshot — drives Admin occupancy chart
 # ---------------------------------------------------------------------------
 
-@router.get("/snapshot")
+@router.get("/snapshot", dependencies=[Depends(require("view_occupancy"))])
 def get_campus_snapshot(
-    is_exam_day: bool = Query(False),
-    is_class_transition: bool = Query(False),
+    is_exam_day: Optional[bool] = Query(None),
+    is_class_transition: Optional[bool] = Query(None),
 ):
     """
-    Returns current predicted occupancy for ALL 12 zones.
-    Used by the Admin dashboard charts — real ML data, not random numbers.
+    Every zone right now: the current count (live camera, or labelled demo / estimate), and the forecast
+    15 minutes ahead with its 80% range and the chance of a free slot.
     """
     now = datetime.now(_IST)
-    all_preds = predict_all_zones(
-        ZONES_MAP,
-        is_exam_day=is_exam_day,
-        is_class_transition=is_class_transition,
-        timestamp=now,
-    )
+    all_preds = live.predict_all(ZONES_MAP, None, 15, is_exam_day, is_class_transition)
 
     zones_data = []
     total_capacity = 0
     total_occupied = 0
+    overrides = active_overrides()
+    blocked_free = 0   # free space in grounds a warden closed / marked full
 
     for z_id, z_meta in ZONES_MAP.items():
         pred = all_preds.get(z_id, {})
         cap = z_meta["operational_capacity"]
-        occ = pred.get("predicted_vehicle_count", 0)
+        occ = pred.get("current_count", 0)          # what is parked now (not the forecast)
         total_capacity += cap
         total_occupied += occ
+        override = overrides.get(z_id)
+        if override:
+            blocked_free += max(0, cap - occ)
 
         zones_data.append({
             "zone_id": z_id,
@@ -456,17 +581,22 @@ def get_campus_snapshot(
             "camera_id": z_meta["camera_id"],
             "category": z_meta["category"],
             "operational_capacity": cap,
-            "predicted_vehicle_count": occ,
+            "predicted_vehicle_count": pred.get("predicted_vehicle_count", occ),     # +15 min
             "predicted_low": pred.get("predicted_low"),
             "predicted_high": pred.get("predicted_high"),
-            "available_spaces": pred.get("available_spaces", cap),
+            "available_spaces": 0 if override else pred.get("available_spaces", cap),
             "occupancy_rate": pred.get("occupancy_rate", 0.0),
             "saturation_probability": pred.get("saturation_probability", 0.0),
-            "current_count": pred.get("current_count", 0),
-            "status": pred.get("status", "AVAILABLE"),
+            "p_free": pred.get("p_free"),
+            "current_count": occ,
+            "current_occupancy_rate": round(min(1.0, occ / cap), 4) if cap else 0.0,
+            "status": override["status"] if override else pred.get("status", "AVAILABLE"),
             "camera_age_seconds": pred.get("camera_age_seconds", 30.0),
-            "camera_status": pred.get("camera_status", "live"),
+            "camera_status": pred.get("camera_status", "live"),      # live | stale | offline | demo
+            "count_source": pred.get("count_source"),                # camera | simulated | profile
+            "confidence": pred.get("confidence"),
             "stream_frozen": pred.get("stream_frozen", False),
+            "override": override,
         })
 
     campus_occ_rate = round(total_occupied / total_capacity, 4) if total_capacity > 0 else 0.0
@@ -474,25 +604,43 @@ def get_campus_snapshot(
     alerts = []
     for z in zones_data:
         base = {"zone_id": z["zone_id"], "name": z["name"]}
+        if z["override"]:
+            o = z["override"]
+            alerts.append({**base, "severity": "warning", "type": f"ZONE_{o['status']}",
+                           "message": f"{z['name']} marked {o['status'].lower()} by {o['set_by']}"
+                                      f"{': ' + o['reason'] if o.get('reason') else ''}."})
+            continue
         if z["occupancy_rate"] >= 0.90:
             alerts.append({**base, "severity": "critical", "type": "SATURATED",
                            "message": f"{z['name']} is forecast at {round(z['occupancy_rate'] * 100)}% of capacity."})
         elif z["saturation_probability"] >= 0.70:
             alerts.append({**base, "severity": "warning", "type": "SATURATION_RISK",
                            "message": f"{z['name']}: {round(z['saturation_probability'] * 100)}% chance of reaching 90% within 15 minutes."})
-        if z["camera_status"] != "live" or z["camera_age_seconds"] > 300:
+        if z["camera_status"] == "stale":
             alerts.append({**base, "severity": "warning", "type": "STALE_CAMERA",
-                           "message": f"{z['name']}: camera data is stale ({round(z['camera_age_seconds'])}s old)."})
+                           "message": f"{z['name']}: last camera count is {round(z['camera_age_seconds'] / 60)} min old."})
+        elif z["camera_status"] == "offline":
+            alerts.append({**base, "severity": "warning", "type": "STALE_CAMERA",
+                           "message": f"{z['name']}: no recent camera count; showing the normal-day estimate."})
+        if z["stream_frozen"]:
+            alerts.append({**base, "severity": "warning", "type": "FROZEN_STREAM",
+                           "message": f"{z['name']}: identical counts for 10+ minutes; the camera feed may be frozen."})
     alerts.sort(key=lambda a: a["severity"] != "critical")
 
+    mode = live.data_mode(ZONES_MAP)
+    ctx = cal.context_at(now.replace(tzinfo=None), calendar_store.list_entries())
     return {
         "alerts": alerts,
         "timestamp": now.isoformat(),
         "total_capacity": total_capacity,
         "total_occupied": total_occupied,
-        "total_available": max(0, total_capacity - total_occupied),
+        "total_available": max(0, total_capacity - total_occupied - blocked_free),
         "campus_occupancy_rate": campus_occ_rate,
-        "is_peak_hour": (8 <= now.hour <= 10) or (11 <= now.hour <= 14) or (16 <= now.hour <= 18),
+        "is_peak_hour": bool(ctx["bell_window"] or campus_occ_rate >= 0.6),
+        "data_mode": mode["mode"],
+        "zones_by_source": mode["zones_by_source"],
+        "calendar_context": ctx,
+        "model": {"version": model_meta().get("version"), "trained_on": model_meta().get("data_source")},
         "zones": zones_data,
     }
 
@@ -501,7 +649,7 @@ def get_campus_snapshot(
 # Model Performance Metrics — drives Admin benchmark panel
 # ---------------------------------------------------------------------------
 
-@router.get("/metrics")
+@router.get("/metrics", dependencies=[Depends(require("view_analytics"))])
 def get_model_metrics():
     """
     Returns real model comparison metrics from artifacts/model_comparison.csv.
@@ -563,7 +711,7 @@ ALLOWED_FIGURES = {
     "feature_correlation_heatmap.png",
 }
 
-@router.get("/shap-figure/{filename}")
+@router.get("/shap-figure/{filename}", dependencies=[Depends(require("view_analytics"))])
 def get_shap_figure(filename: str):
     """
     Serves generated SHAP and diagnostic figures safely from artifacts/figures.
@@ -582,7 +730,7 @@ def get_shap_figure(filename: str):
 # YOLO Vision — Image Upload Detection with ROI & Dual-Model Comparison
 # ---------------------------------------------------------------------------
 
-@router.post("/detect-image")
+@router.post("/detect-image", dependencies=[Depends(require("camera_control"))])
 @limiter.limit("15/minute")
 async def detect_image(
     request: Request,
@@ -670,7 +818,7 @@ async def detect_image(
 # YOLO Vision — Live Webcam Frame
 # ---------------------------------------------------------------------------
 
-@router.post("/detect-frame")
+@router.post("/detect-frame", dependencies=[Depends(require("camera_control"))])
 @limiter.limit("60/minute")
 async def detect_frame(request: Request, file: UploadFile = File(...)):
     """

@@ -16,7 +16,7 @@ from typing import Dict, Iterator, List, Optional
 
 import pandas as pd
 
-from utils.config import load_model_config, load_zones_config
+from utils.config import load_zones_config
 
 DEFAULT_DB = os.environ.get("PARKING_DB", "data/live/observations.db")
 CADENCE_MIN = 5
@@ -96,35 +96,37 @@ class ObservationStore:
         return {"rows": n, "first_bucket": lo, "last_bucket": hi}
 
 
-def _class_transition_flags(ts: pd.Series, bells: List[int], half_window_min: int = 15) -> pd.Series:
-    mins = ts.dt.hour * 60 + ts.dt.minute
-    near = pd.concat([(mins - b).abs() <= half_window_min for b in bells], axis=1).any(axis=1)
-    return (near & (ts.dt.dayofweek < 5)).astype(int)
-
-
-def export_training_frame(store: ObservationStore, out_csv: str, min_cameras: int = 1) -> pd.DataFrame:
+def export_training_frame(store: ObservationStore, out_csv: Optional[str] = None, min_cameras: int = 1,
+                          entries=None) -> pd.DataFrame:
     """
     Convert collected counts to the schema of data/processed/lpu_timeseries.csv so they can be
     fed to the existing training pipeline unchanged. Missing 5-minute buckets are NOT
     interpolated (gaps stay gaps; the feature pipeline drops rows whose lags are missing).
+
+    Exam / holiday / event / bell flags are not observable from cameras: they come from the campus calendar
+    (`entries`, default: the registered calendar provider), the same rules the live forecaster uses.
     """
-    cfg = load_model_config()
+    from features.calendar import compute_flags
     caps = {z["id"]: z["operational_capacity"] for z in load_zones_config()["zones"]}
     df = store.zone_totals()
     df = df[df.cameras >= min_cameras].copy()
     df["operational_capacity"] = df.zone_id.map(caps)
-    df = df.dropna(subset=["operational_capacity"])
+    df = df.dropna(subset=["operational_capacity"]).reset_index(drop=True)
     df["operational_capacity"] = df["operational_capacity"].astype(int)
-    df["is_exam_day"] = 0          # calendar flags are not observable from cameras: set by ops
-    df["is_campus_event"] = 0
-    df["is_class_transition"] = _class_transition_flags(
-        df["timestamp"], cfg["features"]["bell_times_minutes_of_day"])
+    if len(df):
+        fl = compute_flags(df["timestamp"], df["zone_id"].tolist(), entries)
+        for c in ("is_exam_day", "is_campus_event", "is_class_transition", "is_holiday", "event_load"):
+            df[c] = fl[c].to_numpy()
+    else:
+        for c in ("is_exam_day", "is_campus_event", "is_class_transition", "is_holiday", "event_load"):
+            df[c] = []
     df["camera_status"] = "live"
     df["camera_age_seconds"] = 0.0
-    out = df[["timestamp", "zone_id", "vehicle_count", "operational_capacity", "is_exam_day",
-              "is_campus_event", "is_class_transition", "camera_status", "camera_age_seconds"]]
-    Path(out_csv).parent.mkdir(parents=True, exist_ok=True)
-    out.to_csv(out_csv, index=False)
+    out = df[["timestamp", "zone_id", "vehicle_count", "operational_capacity", "is_exam_day", "is_campus_event",
+              "is_class_transition", "is_holiday", "event_load", "camera_status", "camera_age_seconds"]]
+    if out_csv:
+        Path(out_csv).parent.mkdir(parents=True, exist_ok=True)
+        out.to_csv(out_csv, index=False)
     return out
 
 

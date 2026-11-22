@@ -6,11 +6,13 @@ let snapshotTimer = null;
 function statusColor(status) {
     if (status === 'AVAILABLE')    return { badge: 'bg-emerald-50 text-emerald-700 border-emerald-200', dot: 'bg-emerald-500' };
     if (status === 'FILLING_FAST') return { badge: 'bg-amber-50   text-amber-700   border-amber-200',   dot: 'bg-amber-500'   };
+    if (status === 'CLOSED')       return { badge: 'bg-slate-200  text-slate-700   border-slate-300',   dot: 'bg-slate-500'   };
     return                                { badge: 'bg-rose-50    text-rose-700    border-rose-200',    dot: 'bg-rose-500'    };
 }
 
 function statusLabel(status) {
-    return status === 'AVAILABLE' ? 'Available' : status === 'FILLING_FAST' ? 'Filling Fast' : 'Saturated';
+    return { AVAILABLE: 'Available', FILLING_FAST: 'Filling Fast', SATURATED: 'Saturated',
+             CLOSED: 'Closed', FULL: 'Full (override)' }[status] || status;
 }
 
 function setText(id, text) {
@@ -54,6 +56,7 @@ function renderSnapshot(data) {
         tEl.textContent = `Updated: ${d.toLocaleTimeString()}`;
     }
 
+    renderDataMode(data.data_mode);
     renderAlerts(data.alerts || []);
     renderTelemetryTable(data.zones || []);
     try {
@@ -62,6 +65,18 @@ function renderSnapshot(data) {
         console.error('Chart unavailable:', err);
         setText('chartLoading', 'Chart unavailable (Chart.js failed to load).');
     }
+}
+
+function renderDataMode(mode) {
+    const banner = document.getElementById('dataModeBanner');
+    if (!banner) return;
+    const m = {
+        demo: ['bg-amber-50 border-amber-200 text-amber-900', 'Demo data: no camera has reported yet. Counts are simulated and forecasts come from a model trained on synthetic data. Ingest real counts (Cameras & ROI → Publish count, or POST /api/ingest) to switch to live mode.'],
+        estimated: ['bg-rose-50 border-rose-200 text-rose-800', 'No camera has reported recently. Grounds without a fresh count show the normal-day estimate. Check the camera feeds.'],
+    }[mode];
+    if (!m) { banner.classList.add('hidden'); return; }
+    banner.className = `text-sm rounded-xl px-4 py-3 border flex items-start space-x-2.5 ${m[0]}`;
+    document.getElementById('dataModeText').textContent = m[1];
 }
 
 function renderBarChart(zones) {
@@ -74,11 +89,12 @@ function renderBarChart(zones) {
     if (loading) loading.classList.add('hidden');
 
     const labels = zones.map(z => z.name.replace(' Parking', '').replace('LPU ', ''));
-    const occs   = zones.map(z => z.predicted_vehicle_count);
+    const occs   = zones.map(z => z.current_count ?? z.predicted_vehicle_count);
+    const fcst   = zones.map(z => z.predicted_vehicle_count);
     const caps   = zones.map(z => z.operational_capacity);
 
-    const colors = zones.map(z => {
-        const rate = z.operational_capacity > 0 ? z.predicted_vehicle_count / z.operational_capacity : 0;
+    const colors = zones.map((z, i) => {
+        const rate = z.operational_capacity > 0 ? occs[i] / z.operational_capacity : 0;
         return rate >= 0.90 ? '#ef4444' : rate >= 0.75 ? '#f59e0b' : '#10b981';
     });
 
@@ -90,16 +106,29 @@ function renderBarChart(zones) {
             labels,
             datasets: [
                 {
-                    label: 'Occupied Vehicles',
+                    label: 'Parked now',
                     data: occs,
                     backgroundColor: colors,
-                    borderRadius: 6
+                    borderRadius: 6,
+                    order: 2
+                },
+                {
+                    type: 'line',
+                    label: 'Forecast +15 min',
+                    data: fcst,
+                    borderColor: '#0f172a',
+                    backgroundColor: '#0f172a',
+                    showLine: false,
+                    pointStyle: 'rectRot',
+                    pointRadius: 5,
+                    order: 1
                 },
                 {
                     label: 'Ground Capacity',
                     data: caps,
                     backgroundColor: '#e2e8f0',
-                    borderRadius: 6
+                    borderRadius: 6,
+                    order: 3
                 }
             ]
         },
@@ -149,10 +178,15 @@ function renderTelemetryTable(zones) {
         return;
     }
 
+    const SOURCE = { camera: ['Camera', 'bg-emerald-50 text-emerald-700 border-emerald-200'],
+                     simulated: ['Demo', 'bg-amber-50 text-amber-700 border-amber-200'],
+                     profile: ['Estimate', 'bg-slate-100 text-slate-600 border-slate-300'] };
     tbody.innerHTML = zones.map(z => {
         const sc = statusColor(z.status);
-        const satRiskPct = Math.round((z.saturation_probability || 0) * 100);
-        const age = Math.round(z.camera_age_seconds || 0);
+        const pFree = z.p_free == null ? null : Math.round(z.p_free * 100);
+        const age = Math.round((z.camera_age_seconds || 0) / 60);
+        const [srcLabel, srcTone] = SOURCE[z.count_source] || ['—', ''];
+        const now = z.current_count ?? 0;
 
         return `
         <tr class="hover:bg-slate-50 transition-colors">
@@ -160,13 +194,14 @@ function renderTelemetryTable(zones) {
             <td class="px-4 py-3 font-medium">${z.name}</td>
             <td class="px-4 py-3 font-mono text-slate-500">${z.camera_id || 'CAM-01'}</td>
             <td class="px-4 py-3 font-bold text-slate-700">${z.operational_capacity}</td>
+            <td class="px-4 py-3 font-bold ${now > z.operational_capacity * 0.9 ? 'text-rose-600' : 'text-slate-900'}">${now}</td>
             <td class="px-4 py-3 font-bold ${z.predicted_vehicle_count > z.operational_capacity * 0.9 ? 'text-rose-600' : 'text-slate-900'}">${z.predicted_vehicle_count}</td>
-            <td class="px-4 py-3 font-bold text-emerald-600">${z.available_spaces}</td>
             <td class="px-4 py-3 font-mono text-slate-500">${z.predicted_low != null ? `${z.predicted_low}–${z.predicted_high}` : '—'}</td>
             <td class="px-4 py-3">
-                <span class="font-bold ${satRiskPct > 70 ? 'text-rose-600' : 'text-slate-600'}">${satRiskPct}%</span>
+                ${pFree == null ? '<span class="text-slate-400">—</span>' : `<span class="font-bold ${pFree >= 70 ? 'text-emerald-600' : pFree >= 35 ? 'text-amber-600' : 'text-rose-600'}">${pFree}%</span>`}
             </td>
-            <td class="px-4 py-3 text-slate-400 font-mono text-[11px]">${age}s ago</td>
+            <td class="px-4 py-3"><span class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border ${srcTone}">${srcLabel}</span>
+                ${z.count_source === 'camera' ? `<span class="text-slate-400 font-mono text-[11px] ml-1">${age} min ago</span>` : ''}</td>
             <td class="px-4 py-3">
                 <span class="inline-flex items-center text-[11px] px-2.5 py-0.5 rounded-full font-bold border ${sc.badge}">
                     <span class="w-1.5 h-1.5 rounded-full ${sc.dot} mr-1"></span>

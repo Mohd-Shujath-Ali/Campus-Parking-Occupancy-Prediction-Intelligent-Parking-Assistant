@@ -1,18 +1,32 @@
 import numpy as np
 import pandas as pd
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, Optional
 from sklearn.linear_model import Ridge
 from sklearn.ensemble import RandomForestRegressor
 import xgboost as xgb
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 
+from features.feature_pipeline import horizon_col
 from utils.config import xgb_params
 from models.pipeline import build_pipeline
 
+HORIZON_MINUTES = {"H15": 15, "H30": 30, "H60": 60}
+
+
+def profile_offset(X: pd.DataFrame, horizon_key: str) -> np.ndarray:
+    """Expected vehicle count at arrival time on a NORMAL day: profile(t+h) x capacity."""
+    h = HORIZON_MINUTES[horizon_key]
+    return (X[horizon_col(h, "profile")] * X["operational_capacity"]).to_numpy(dtype=float)
+
+
 class MultiHorizonForecaster:
     """
-    Manages direct multi-horizon estimators (H=15, H=30, H=60 minutes)
-    and benchmarks them against Persistence and Historical Mean baselines.
+    Direct multi-horizon estimators (H=15, H=30, H=60 minutes): one model per horizon, each predicting
+    the vehicle count at that horizon straight from the current state, calendar and profile features.
+
+    (A "predict the deviation from the normal-day profile" variant was measured in
+    experiments/forecast_ablation.py and was slightly worse than predicting the count directly, so it
+    is not offered: the profile reaches the model as features instead.)
     """
     def __init__(self, model_type: str = "xgboost", use_pipeline: bool = True,
                  params: Dict[str, Any] = None):
@@ -37,29 +51,27 @@ class MultiHorizonForecaster:
         est = self._get_estimator()
         return build_pipeline(est) if self.use_pipeline else est
 
-    def fit(self, X_train: pd.DataFrame, targets_train: Dict[str, pd.Series]):
-        """
-        Fits dedicated models for H15, H30, and H60.
-        """
+    def fit(self, X_train: pd.DataFrame, targets_train: Dict[str, pd.Series],
+            sample_weight: Optional[np.ndarray] = None):
+        """Fits dedicated models for H15, H30, and H60 (optionally weighting rows, e.g. real over synthetic)."""
         for h in self.horizons:
             estimator = self._build()
-            estimator.fit(X_train, targets_train[h])
+            if sample_weight is None:
+                estimator.fit(X_train, np.asarray(targets_train[h], dtype=float))
+            else:
+                key = "model__sample_weight" if self.use_pipeline else "sample_weight"
+                estimator.fit(X_train, np.asarray(targets_train[h], dtype=float), **{key: sample_weight})
             self.models[h] = estimator
 
+    def predict_horizon(self, X: pd.DataFrame, horizon_key: str) -> np.ndarray:
+        return self.models[horizon_key].predict(X)
+
     def predict(self, X: pd.DataFrame) -> Dict[str, np.ndarray]:
-        """
-        Generates predictions for all horizons.
-        """
-        preds = {}
-        for h in self.horizons:
-            preds[h] = self.models[h].predict(X)
-        return preds
+        """Generates predictions for all horizons."""
+        return {h: self.predict_horizon(X, h) for h in self.horizons}
 
     @staticmethod
     def evaluate(y_true: pd.Series, y_pred: np.ndarray) -> Dict[str, float]:
-        """
-        Calculates MAE, RMSE, and R2.
-        """
         mae = mean_absolute_error(y_true, y_pred)
         rmse = np.sqrt(mean_squared_error(y_true, y_pred))
         r2 = r2_score(y_true, y_pred)

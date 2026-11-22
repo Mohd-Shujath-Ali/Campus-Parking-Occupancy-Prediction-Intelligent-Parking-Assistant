@@ -48,6 +48,16 @@ class ZoneHistory:
         with self._lock:
             self._obs.clear()
 
+    def latest(self, zone_id: str) -> Optional[Tuple[datetime, int]]:
+        """Most recent (naive IST timestamp, count) for a zone, or None."""
+        with self._lock:
+            q = self._obs.get(zone_id)
+            return q[-1] if q else None
+
+    def has_data(self) -> bool:
+        with self._lock:
+            return any(self._obs.values())
+
     def _at(self, zone_id: str, target: datetime) -> Optional[int]:
         best, best_d = None, None
         for t, c in self._obs.get(zone_id, ()):

@@ -76,6 +76,14 @@ class ParkingRanker:
             occ_rate = effective_count / cap if cap > 0 else 1.0
             sat_prob = pred.get("saturation_prob", 0.0)
             cam_age = pred.get("camera_age_seconds", 30.0)
+            confidence = pred.get("confidence")
+
+            # Chance a slot is still free on arrival (calibrated by the forecaster). Drivers already
+            # heading there take slots, so scale it by the share of expected free slots left.
+            p_free = pred.get("p_free")
+            if p_free is not None:
+                expected_free = max(0, cap - pred_count)
+                p_free = float(p_free) * (max(0.0, expected_free - in_flight) / expected_free if expected_free else 0.0)
 
             # Retrieve walking distance to destination (with case-insensitive / space tolerance)
             dest_distances = z_meta.get("walking_distances_meters", {})
@@ -86,8 +94,12 @@ class ParkingRanker:
 
             # Multi-criteria scoring
             avail_score = max(0.0, 1.0 - occ_rate)
+            if p_free is not None:
+                blend = self.weights.get("p_free_blend", 0.6)
+                avail_score = blend * p_free + (1.0 - blend) * avail_score
             dist_score = max(0.0, 1.0 - (dist / max_dist))
-            freshness_penalty = 0.3 if cam_age > self.weights["camera_stale_seconds"] else 0.0
+            # Stale camera, or no live count at all (normal-day estimate): trust this ground's numbers less
+            freshness_penalty = 0.3 if (cam_age > self.weights["camera_stale_seconds"] or confidence == "low") else 0.0
             saturation_risk_penalty = (
                 0.5 if sat_prob > self.weights["saturation_hard_exclude_threshold"] else 0.0
             )
@@ -116,7 +128,14 @@ class ParkingRanker:
                 "walking_distance_meters": dist,
                 "walking_time_minutes": walk_time_mins,
                 "status": status,
-                "camera_age_seconds": cam_age
+                "camera_age_seconds": cam_age,
+                "p_free": round(p_free, 3) if p_free is not None else None,
+                "likely_full": bool(p_free is not None and p_free < self.weights.get("min_p_free_warning", 0.35)),
+                "predicted_low": pred.get("predicted_low"),
+                "predicted_high": pred.get("predicted_high"),
+                "confidence": confidence,
+                "count_source": pred.get("count_source"),
+                "forecast_basis": pred.get("forecast_basis"),
             })
 
         # Sort descending by utility score

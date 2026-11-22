@@ -18,8 +18,9 @@ def test_clear_winner_is_not_dispersed():
 def test_near_ties_are_dispersed_across_lots():
     r = ParkingRanker(seed=0)
     preds = _preds(r, {})  # all zones 50% full -> scores differ only by distance
-    plain = r.rank_zones("Block_1", preds, apply_anti_herding=False)
+    # Block 26's two lots are 50 m and 60 m away: a genuine near-tie
+    plain = r.rank_zones("Block_26_CSE", preds, apply_anti_herding=False)
     gap = plain[0]["score"] - plain[1]["score"]
     assert gap <= r.weights["anti_herding_score_delta_threshold"]
-    leads = {ParkingRanker(seed=s).rank_zones("Block_1", preds)[0]["zone_id"] for s in range(60)}
+    leads = {ParkingRanker(seed=s).rank_zones("Block_26_CSE", preds)[0]["zone_id"] for s in range(60)}
     assert len(leads) >= 2
