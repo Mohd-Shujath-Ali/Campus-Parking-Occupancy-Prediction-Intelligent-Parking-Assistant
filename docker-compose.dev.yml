@@ -1,28 +1,29 @@
-version: "3.8"
-
+# Development with hot reload:  docker compose -f docker-compose.dev.yml up --build
+# Source folders are mounted over the image, and uvicorn restarts when they change.
 services:
   parking-assistant-dev:
     build:
       context: .
       dockerfile: Dockerfile
+      target: lean            # or: full
     image: campus-parking-intelligence:dev
     container_name: campus-parking-dev
     ports:
       - "8000:8000"
     environment:
-      - ENVIRONMENT=development
-      - HOST=0.0.0.0
       - PORT=8000
+      - AUTH_DB=/data/app.db
+      - PARKING_DB=/data/observations.db
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
+      - FORWARDED_ALLOW_IPS=127.0.0.1
       - BEST_MODEL_PATH=/app/models/weights/best.pt
       - YOLO26L_MODEL_PATH=/app/models/weights/yolo26l.pt
-      - TORCHINDUCTOR_CACHE_DIR=/tmp/torch_inductor
-      - TORCH_HOME=/tmp/torch
-      - YOLO_CONFIG_DIR=/tmp/Ultralytics
-      - MPLCONFIGDIR=/tmp/matplotlib
     volumes:
+      - parking-data-dev:/data
       # Live-mount source directories for instant hot reload
       - ./api:/app/api
       - ./frontend:/app/frontend
+      - ./public:/app/public
       - ./computer_vision:/app/computer_vision
       - ./models:/app/models
       - ./recommendation:/app/recommendation
@@ -30,3 +31,6 @@ services:
       - ./configs:/app/configs
       - ./artifacts:/app/artifacts
     command: ["python", "-m", "uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+
+volumes:
+  parking-data-dev:

@@ -1,0 +1,11 @@
+# Shell scripts must keep LF line endings, or the container fails with "bad interpreter" when built from Windows.
+*.sh text eol=lf
+docker-entrypoint.sh text eol=lf
+
+# Binary artifacts: never touch line endings
+*.joblib binary
+*.ubj binary
+*.onnx binary
+*.pt binary
+*.png binary
+*.ico binary

@@ -1,38 +1,51 @@
-version: "3.8"
-
+# Run the app in Docker:  docker compose up --build -d     (http://localhost:8000)
+#
+# The default image is the lean one (API, dashboards, forecasts, in-browser YOLO; ~0.4 GB RAM). For server-side YOLO
+# build the full image instead: set `target: full` below and raise the memory limit to 4G.
+#
+# Accounts, the calendar and camera counts are stored in the `parking-data` volume, so they survive rebuilds.
+# First start: the admin password comes from ADMIN_PASSWORD (set it in your shell or in a .env file next to this
+# file; 12+ characters, a letter and a digit, not containing "admin"). If unset, a one-time admin password is
+# printed in `docker compose logs`.
 services:
   parking-assistant:
     build:
       context: .
       dockerfile: Dockerfile
+      target: lean            # or: full
     image: campus-parking-intelligence:latest
     container_name: campus-parking-app
     restart: unless-stopped
     ports:
       - "8000:8000"
     environment:
-      - ENVIRONMENT=production
-      - HOST=0.0.0.0
       - PORT=8000
-      - BEST_MODEL_PATH=/app/models/weights/best.pt
+      - AUTH_DB=/data/app.db
+      - PARKING_DB=/data/observations.db
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
+      - INGEST_API_KEY=${INGEST_API_KEY:-}
+      - COOKIE_SECURE=${COOKIE_SECURE:-0}          # set to 1 once you serve it over HTTPS
+      - FORWARDED_ALLOW_IPS=127.0.0.1               # direct access, no proxy in front: do not trust forwarded headers
+      - BEST_MODEL_PATH=/app/models/weights/best.pt  # only used by the `full` target
       - YOLO26L_MODEL_PATH=/app/models/weights/yolo26l.pt
-      - TORCHINDUCTOR_CACHE_DIR=/tmp/torch_inductor
-      - TORCH_HOME=/tmp/torch
-      - YOLO_CONFIG_DIR=/tmp/Ultralytics
-      - MPLCONFIGDIR=/tmp/matplotlib
     volumes:
+      - parking-data:/data
       # Persist newly trained ML artifacts or configuration changes
       - ./artifacts:/app/artifacts
       - ./configs:/app/configs:ro
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8000/api/health || exit 1"]
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/api/health || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 30s
+      start_period: 60s
     deploy:
       resources:
         limits:
-          memory: 4G
+          memory: 1G           # use 4G with `target: full`
         reservations:
-          memory: 1G
+          memory: 512M
+
+volumes:
+  parking-data:

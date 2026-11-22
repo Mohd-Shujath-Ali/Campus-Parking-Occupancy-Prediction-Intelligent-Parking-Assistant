@@ -1,38 +1,45 @@
-# Render Infrastructure-as-Code Blueprint
+# Render Infrastructure-as-Code Blueprint: ONE Docker web service serving the dashboards, the REST API and the
+# in-browser YOLO model from the same origin (no CORS or API-base configuration needed).
 #
-# Deploys ONE web service that serves the dashboards, the REST API and the browser-side YOLO model
-# from the same origin, so no CORS or API-base configuration is needed.
+# Deploy: Render dashboard -> New -> Blueprint -> pick this repo. Render builds ./Dockerfile (the lean image) from
+# the branch below and asks you for the `sync: false` values (ADMIN_PASSWORD).
 #
-# Branch: testing. Change `branch` below to deploy another branch.
+# Plan and data
+#  * Accounts, the campus calendar, camera counts and the audit log live in SQLite files. They only survive redeploys
+#    and restarts on a PERSISTENT DISK, and disks need a paid plan, hence `starter` below. One instance only: a disk
+#    cannot be shared between instances, and the app keeps forecast history in process memory.
+#  * Memory: the app measured ~310 MB resident (370 MB peak) with all models loaded, so 512 MB (starter) fits with a
+#    little headroom. Move to `standard` (2 GB) if you add the `full` image target or see out-of-memory restarts.
+#  * FREE PLAN (demo only): set `plan: free`, delete the `disk:` block and the AUTH_DB / PARKING_DB variables. It works,
+#    but accounts, the calendar and counts reset on every restart or redeploy, and the service sleeps when idle.
 #
-# Notes
-#  * requirements-render.txt is a lean, pinned runtime set (no torch/ultralytics/optuna/shap).
-#    Server-side YOLO (/api/detect-*) is therefore disabled; the in-browser ONNX YOLO on /vision works.
-#  * The model artefacts in artifacts/pipelines are committed pickles built with the pinned versions.
-#  * Memory: ~400 MB resident once all models are loaded, which fits a 512 MB instance with little
-#    headroom. If the service restarts with out-of-memory errors, move to a larger plan.
-#  * Collected camera counts (POST /api/ingest) are stored in SQLite on the instance's ephemeral disk
-#    and are lost on redeploy. Ingest requires the generated INGEST_API_KEY (see the Render dashboard).
+# Secrets: ADMIN_PASSWORD is entered in the dashboard on first deploy (12+ characters, with a letter and a digit, and
+# not containing "admin"). If you skip it, a one-time admin password is printed in the deploy log instead.
 
 services:
   - type: web
     name: lpu-parking
-    runtime: python
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
     region: singapore
-    plan: free
-    branch: testing
-    buildCommand: pip install --upgrade pip && pip install -r requirements-render.txt
-    startCommand: uvicorn api.main:app --host 0.0.0.0 --port $PORT
+    plan: starter
+    branch: main
     healthCheckPath: /api/health
+    disk:
+      name: parking-data
+      mountPath: /var/data
+      sizeGB: 1
     envVars:
-      - key: PYTHON_VERSION
-        value: 3.13.5
+      - key: AUTH_DB
+        value: /var/data/app.db
+      - key: PARKING_DB
+        value: /var/data/observations.db
+      - key: COOKIE_SECURE
+        value: "1"
+      - key: ADMIN_USERNAME
+        value: admin
+      - key: ADMIN_PASSWORD
+        sync: false
       - key: INGEST_API_KEY
         generateValue: true
-
-# ---------------------------------------------------------------------------------------------
-# Optional (not used by default): decoupled static frontend. Build it with
-#   BACKEND_URL=https://<your-api-host> python scripts/build_static_frontend.py
-# and publish `frontend_dist/` as a Render Static Site. The decoupled layout needs the backend URL
-# baked in at build time, which is why the default blueprint serves everything from one service.
-# ---------------------------------------------------------------------------------------------
