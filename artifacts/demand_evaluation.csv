@@ -1,0 +1,3 @@
+Model,MAE_occupancy_pct,RMSE_occupancy_pct,peak_hour_within_1h,peak_level_MAE_pct
+Calendar XGBoost,3.89,5.8,0.724,5.45
+Seasonal mean,7.89,15.16,0.715,14.51

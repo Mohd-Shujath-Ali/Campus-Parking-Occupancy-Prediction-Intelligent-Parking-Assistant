@@ -1,0 +1,2 @@
+# Render uses the same lean, pinned runtime set as requirements.txt.
+-r requirements.txt

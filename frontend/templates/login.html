@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sign in — LPU Smart Parking</title>
+    <link rel="icon" href="/favicon.ico" type="image/x-icon">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="/static/js/config.js"></script>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen font-sans">
+<div class="min-h-screen grid lg:grid-cols-2">
+    <!-- Brand panel -->
+    <section class="hidden lg:flex flex-col justify-between bg-gradient-to-br from-orange-600 via-orange-500 to-amber-500 text-white p-12">
+        <div class="flex items-center space-x-3">
+            <div class="h-12 w-12 rounded-xl bg-white p-1 shadow flex items-center justify-center">
+                <img src="/static/lpu_logo.png" alt="LPU Logo" class="h-full w-full object-contain">
+            </div>
+            <div>
+                <p class="text-lg font-black leading-tight">LPU Smart Parking</p>
+                <p class="text-xs text-orange-100">Lovely Professional University · Punjab</p>
+            </div>
+        </div>
+        <div class="space-y-6 max-w-md">
+            <h1 class="text-4xl font-black leading-tight">Park nearest to your block, before it fills up.</h1>
+            <ul class="space-y-3 text-sm text-orange-50">
+                <li class="flex items-start space-x-3"><i class="fa-solid fa-location-crosshairs mt-0.5"></i><span>Recommendations start from your own block, ranked by walking distance and forecast occupancy.</span></li>
+                <li class="flex items-start space-x-3"><i class="fa-solid fa-clock mt-0.5"></i><span>15, 30 and 60 minute forecasts across 12 campus grounds.</span></li>
+                <li class="flex items-start space-x-3"><i class="fa-solid fa-shield-halved mt-0.5"></i><span>One sign-in for students, faculty, wardens, vendors and staff.</span></li>
+            </ul>
+        </div>
+        <p class="text-xs text-orange-100">Access is limited to accounts issued by the campus parking office.</p>
+    </section>
+
+    <!-- Form -->
+    <section class="flex items-center justify-center px-4 py-10 sm:px-8">
+        <div class="w-full max-w-sm space-y-6">
+            <div class="lg:hidden flex items-center space-x-3">
+                <div class="h-11 w-11 rounded-xl bg-white p-1 border border-slate-200 shadow-sm flex items-center justify-center">
+                    <img src="/static/lpu_logo.png" alt="LPU Logo" class="h-full w-full object-contain">
+                </div>
+                <div>
+                    <p class="text-base font-black text-slate-900 leading-tight">LPU Smart Parking</p>
+                    <p class="text-[11px] text-slate-500">Lovely Professional University</p>
+                </div>
+            </div>
+
+            <div>
+                <h2 class="text-2xl font-black text-slate-900">Sign in</h2>
+                <p class="text-sm text-slate-500 mt-1">Use the user ID issued to you: registration number, employee ID or vendor ID.</p>
+            </div>
+
+            <form id="loginForm" class="space-y-4" novalidate>
+                <input type="hidden" id="nextPath" value="{{ next }}">
+                <div>
+                    <label for="username" class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">User ID</label>
+                    <input id="username" name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false" required maxlength="40"
+                           class="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 text-sm font-medium focus:ring-2 focus:ring-orange-500 focus:outline-none" placeholder="e.g. 12301234">
+                </div>
+                <div>
+                    <label for="password" class="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1.5">Password</label>
+                    <div class="relative">
+                        <input id="password" name="password" type="password" autocomplete="current-password" required maxlength="128"
+                               class="w-full bg-white border border-slate-300 rounded-xl px-3.5 py-2.5 pr-11 text-sm font-medium focus:ring-2 focus:ring-orange-500 focus:outline-none">
+                        <button type="button" id="togglePw" class="absolute inset-y-0 right-0 px-3.5 text-slate-400 hover:text-slate-700" aria-label="Show password">
+                            <i class="fa-solid fa-eye text-sm"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <div id="loginError" class="hidden text-sm bg-rose-50 border border-rose-200 text-rose-800 rounded-xl px-3.5 py-2.5" role="alert"></div>
+
+                <button id="loginBtn" type="submit" class="w-full bg-slate-900 hover:bg-orange-600 disabled:opacity-60 text-white font-bold py-3 rounded-xl shadow transition-all text-sm flex items-center justify-center space-x-2">
+                    <i class="fa-solid fa-right-to-bracket"></i><span>Sign in</span>
+                </button>
+            </form>
+
+            <div class="text-xs text-slate-500 bg-white border border-slate-200 rounded-xl p-3.5 space-y-1">
+                <p><span class="font-bold text-slate-700">First time?</span> Sign in with the one-time password from the parking office. You will be asked to set your own.</p>
+                <p><span class="font-bold text-slate-700">Forgot your password?</span> Ask the parking administrator to reset it.</p>
+            </div>
+        </div>
+    </section>
+</div>
+<script src="/static/js/login.js"></script>
+</body>
+</html>

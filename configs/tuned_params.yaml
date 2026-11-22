@@ -1,0 +1,11 @@
+# Written by experiments/tune_xgboost.py - overrides model_config.yaml
+xgboost_regressor:
+  colsample_bytree: 0.59269505510812
+  gamma: 2.3040107817523747
+  learning_rate: 0.029583937777274014
+  max_depth: 10
+  min_child_weight: 11
+  n_estimators: 550
+  reg_alpha: 0.07005233096131681
+  reg_lambda: 0.08873205970138019
+  subsample: 0.8278992162687192

@@ -1,4 +1,6 @@
 import pytest
+pytest.importorskip("cv2", reason="OpenCV is not installed in the slim runtime")
+import pytest
 import numpy as np
 from computer_vision.roi_manager import ROIManager
 from computer_vision.occupancy_counter import MultiCameraOccupancyCounter

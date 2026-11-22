@@ -25,6 +25,10 @@
         </div>
     </div>
 
+    <div id="dataModeBanner" class="hidden text-sm rounded-xl px-4 py-3 border flex items-start space-x-2.5" role="status">
+        <i class="fa-solid fa-circle-info mt-0.5"></i><p id="dataModeText"></p>
+    </div>
+
     <!-- Campus KPI Ribbon -->
     <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
         <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
@@ -49,12 +53,80 @@
         </div>
     </div>
 
+    <!-- Operational Alerts -->
+    <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-3">
+        <div class="flex justify-between items-center border-b border-slate-100 pb-3">
+            <div>
+                <h4 class="font-bold text-slate-900 text-sm flex items-center space-x-2"><i class="fa-solid fa-bell text-orange-600"></i><span>Operational Alerts</span></h4>
+                <p class="text-xs text-slate-400">Zones forecast at or above 90%, high saturation risk, or with stale camera data</p>
+            </div>
+            <span id="alertCount" class="text-xs font-semibold px-2.5 py-1 bg-slate-100 rounded-full text-slate-600 border border-slate-200">0 active</span>
+        </div>
+        <ul id="alertList" class="space-y-2 text-xs"><li class="text-slate-400">Checking zones…</li></ul>
+    </div>
+
+    {% if user and ('override_zone' in perms or 'report_violation' in perms or 'view_reports' in perms) %}
+    <div class="grid grid-cols-1 {% if 'override_zone' in perms %}xl:grid-cols-2{% endif %} gap-6">
+        {% if 'override_zone' in perms %}
+        <!-- Zone overrides (warden / admin) -->
+        <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+            <div class="border-b border-slate-100 pb-3">
+                <h4 class="font-bold text-slate-900 text-sm flex items-center space-x-2"><i class="fa-solid fa-road-barrier text-orange-600"></i><span>Ground Overrides</span></h4>
+                <p class="text-xs text-slate-400">Close a ground or mark it full. Drivers stop being sent there immediately.</p>
+            </div>
+            <form id="overrideForm" class="grid grid-cols-1 sm:grid-cols-2 gap-3" novalidate>
+                <select id="ovZone" class="sm:col-span-2 bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-sm font-medium focus:ring-2 focus:ring-orange-500 focus:outline-none" aria-label="Ground"></select>
+                <select id="ovStatus" class="bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-sm font-medium focus:ring-2 focus:ring-orange-500 focus:outline-none" aria-label="Status">
+                    <option value="FULL">Mark full</option>
+                    <option value="CLOSED">Close ground</option>
+                </select>
+                <select id="ovMinutes" class="bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-sm font-medium focus:ring-2 focus:ring-orange-500 focus:outline-none" aria-label="Duration">
+                    <option value="30">For 30 minutes</option>
+                    <option value="60" selected>For 1 hour</option>
+                    <option value="120">For 2 hours</option>
+                    <option value="240">For 4 hours</option>
+                    <option value="">Until I clear it</option>
+                </select>
+                <input id="ovReason" maxlength="200" placeholder="Reason (shown to drivers), e.g. convocation setup" class="sm:col-span-2 bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none">
+                <button type="submit" class="sm:col-span-2 bg-slate-900 hover:bg-orange-600 text-white font-bold py-2.5 rounded-xl text-sm transition-all">Apply override</button>
+            </form>
+            <ul id="overrideList" class="space-y-2 text-xs"></ul>
+        </div>
+        {% endif %}
+
+        <!-- Violation reports (guard / warden / admin) -->
+        <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+            <div class="flex justify-between items-start border-b border-slate-100 pb-3 gap-2">
+                <div>
+                    <h4 class="font-bold text-slate-900 text-sm flex items-center space-x-2"><i class="fa-solid fa-clipboard-list text-orange-600"></i><span>Violation Reports</span></h4>
+                    <p class="text-xs text-slate-400">Wrong parking, blocked lanes and unauthorised vehicles.</p>
+                </div>
+                <select id="reportFilter" class="bg-slate-50 border border-slate-300 rounded-lg px-2 py-1 text-xs font-medium focus:outline-none" aria-label="Filter reports">
+                    <option value="open">Open</option>
+                    <option value="resolved">Resolved</option>
+                    <option value="">All</option>
+                </select>
+            </div>
+            {% if 'report_violation' in perms %}
+            <form id="reportForm" class="grid grid-cols-1 sm:grid-cols-2 gap-3" novalidate>
+                <select id="rpZone" class="bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-sm font-medium focus:ring-2 focus:ring-orange-500 focus:outline-none" aria-label="Ground"></select>
+                <select id="rpCategory" class="bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-sm font-medium focus:ring-2 focus:ring-orange-500 focus:outline-none" aria-label="Category"></select>
+                <input id="rpPlate" maxlength="20" placeholder="Vehicle number (optional)" class="bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-sm font-mono uppercase focus:ring-2 focus:ring-orange-500 focus:outline-none">
+                <input id="rpDesc" maxlength="500" placeholder="What happened? (optional)" class="bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-orange-500 focus:outline-none">
+                <button type="submit" class="sm:col-span-2 bg-slate-900 hover:bg-orange-600 text-white font-bold py-2.5 rounded-xl text-sm transition-all">File report</button>
+            </form>
+            {% endif %}
+            <ul id="reportList" class="space-y-2 text-xs max-h-96 overflow-y-auto"></ul>
+        </div>
+    </div>
+    {% endif %}
+
     <!-- Live Zone Occupancy Chart -->
     <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-3">
         <div class="flex justify-between items-center border-b border-slate-100 pb-3">
             <div>
-                <h4 class="font-bold text-slate-900 text-sm">Zone Occupancy vs. Operational Capacity (Real-Time)</h4>
-                <p class="text-xs text-slate-400">Visual comparison of currently occupied slots against ground capacity limits</p>
+                <h4 class="font-bold text-slate-900 text-sm">Zone Occupancy vs. Operational Capacity</h4>
+                <p class="text-xs text-slate-400">What is parked now against each ground's capacity, with the +15 minute forecast marked</p>
             </div>
             <span class="text-xs font-semibold px-2.5 py-1 bg-slate-100 rounded-full text-slate-600 border border-slate-200">Auto-refresh (10s)</span>
         </div>
@@ -83,15 +155,16 @@
                         <th class="px-4 py-3">Ground Name</th>
                         <th class="px-4 py-3">CCTV Camera</th>
                         <th class="px-4 py-3">Capacity</th>
-                        <th class="px-4 py-3">Occupied</th>
-                        <th class="px-4 py-3">Available</th>
-                        <th class="px-4 py-3">Sat. Risk</th>
-                        <th class="px-4 py-3">Freshness</th>
+                        <th class="px-4 py-3">Parked now</th>
+                        <th class="px-4 py-3">Forecast +15 min</th>
+                        <th class="px-4 py-3">80% Range</th>
+                        <th class="px-4 py-3">Chance of free slot</th>
+                        <th class="px-4 py-3">Count source</th>
                         <th class="px-4 py-3">Status</th>
                     </tr>
                 </thead>
                 <tbody id="cameraTableBody" class="divide-y divide-slate-100 text-slate-700">
-                    <tr><td colspan="9" class="px-4 py-8 text-center text-slate-400">Loading ground telemetry…</td></tr>
+                    <tr><td colspan="10" class="px-4 py-8 text-center text-slate-400">Loading ground telemetry…</td></tr>
                 </tbody>
             </table>
         </div>
@@ -101,4 +174,5 @@
 
 {% block extra_scripts %}
 <script src="/static/js/admin.js"></script>
+{% if user %}<script src="/static/js/ops.js"></script>{% endif %}
 {% endblock %}

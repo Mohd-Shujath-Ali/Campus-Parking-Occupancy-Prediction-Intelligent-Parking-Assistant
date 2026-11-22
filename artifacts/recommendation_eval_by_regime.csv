@@ -1,0 +1,91 @@
+regime,horizon,policy,success_pct,mean_walk_m,expected_cost_m
+event,H15,nearest,76.8,34,150
+event,H15,nearest_open_now,96.7,97,114
+event,H15,most_free_now,100.0,505,505
+event,H15,recommender,99.4,122,125
+event,H15,recommender_dispersed,99.5,131,133
+event,H15,oracle,100.0,95,95
+event,H30,nearest,77.6,34,146
+event,H30,nearest_open_now,94.1,97,126
+event,H30,most_free_now,100.0,505,505
+event,H30,recommender,98.3,114,122
+event,H30,recommender_dispersed,98.8,124,130
+event,H30,oracle,100.0,93,93
+event,H60,nearest,79.2,34,138
+event,H60,nearest_open_now,92.2,97,136
+event,H60,most_free_now,100.0,505,505
+event,H60,recommender,98.2,108,117
+event,H60,recommender_dispersed,98.3,116,124
+event,H60,oracle,100.0,88,88
+exam day,H15,nearest,92.6,34,71
+exam day,H15,nearest_open_now,96.3,53,72
+exam day,H15,most_free_now,100.0,481,481
+exam day,H15,recommender,99.9,90,91
+exam day,H15,recommender_dispersed,99.9,101,102
+exam day,H15,oracle,100.0,53,53
+exam day,H30,nearest,92.5,34,71
+exam day,H30,nearest_open_now,94.9,53,79
+exam day,H30,most_free_now,97.8,481,493
+exam day,H30,recommender,99.6,87,89
+exam day,H30,recommender_dispersed,99.7,99,101
+exam day,H30,oracle,100.0,53,53
+exam day,H60,nearest,92.2,34,73
+exam day,H60,nearest_open_now,93.2,53,87
+exam day,H60,most_free_now,92.5,481,519
+exam day,H60,recommender,99.4,86,89
+exam day,H60,recommender_dispersed,99.6,99,101
+exam day,H60,oracle,100.0,54,54
+holiday,H15,nearest,96.6,34,51
+holiday,H15,nearest_open_now,99.3,39,42
+holiday,H15,most_free_now,100.0,441,441
+holiday,H15,recommender,100.0,41,41
+holiday,H15,recommender_dispersed,100.0,48,48
+holiday,H15,oracle,100.0,39,39
+holiday,H30,nearest,96.6,34,51
+holiday,H30,nearest_open_now,98.7,39,45
+holiday,H30,most_free_now,100.0,441,441
+holiday,H30,recommender,100.0,42,42
+holiday,H30,recommender_dispersed,100.0,47,47
+holiday,H30,oracle,100.0,39,39
+holiday,H60,nearest,96.6,34,51
+holiday,H60,nearest_open_now,97.8,39,50
+holiday,H60,most_free_now,100.0,441,441
+holiday,H60,recommender,100.0,42,42
+holiday,H60,recommender_dispersed,100.0,48,48
+holiday,H60,oracle,100.0,39,39
+normal weekday,H15,nearest,89.6,34,86
+normal weekday,H15,nearest_open_now,97.3,62,75
+normal weekday,H15,most_free_now,100.0,457,457
+normal weekday,H15,recommender,100.0,85,85
+normal weekday,H15,recommender_dispersed,100.0,94,95
+normal weekday,H15,oracle,100.0,63,63
+normal weekday,H30,nearest,89.4,34,87
+normal weekday,H30,nearest_open_now,95.6,62,84
+normal weekday,H30,most_free_now,100.0,457,457
+normal weekday,H30,recommender,99.8,85,86
+normal weekday,H30,recommender_dispersed,99.8,95,96
+normal weekday,H30,oracle,100.0,63,63
+normal weekday,H60,nearest,89.0,34,89
+normal weekday,H60,nearest_open_now,92.6,62,99
+normal weekday,H60,most_free_now,99.6,457,459
+normal weekday,H60,recommender,99.9,86,87
+normal weekday,H60,recommender_dispersed,99.8,95,96
+normal weekday,H60,oracle,100.0,65,65
+weekend,H15,nearest,96.8,34,50
+weekend,H15,nearest_open_now,99.3,39,42
+weekend,H15,most_free_now,100.0,441,441
+weekend,H15,recommender,100.0,41,41
+weekend,H15,recommender_dispersed,100.0,47,47
+weekend,H15,oracle,100.0,39,39
+weekend,H30,nearest,96.9,34,49
+weekend,H30,nearest_open_now,98.9,39,44
+weekend,H30,most_free_now,100.0,441,441
+weekend,H30,recommender,100.0,41,41
+weekend,H30,recommender_dispersed,100.0,48,48
+weekend,H30,oracle,100.0,38,38
+weekend,H60,nearest,97.0,34,49
+weekend,H60,nearest_open_now,98.2,39,48
+weekend,H60,most_free_now,100.0,441,441
+weekend,H60,recommender,100.0,41,41
+weekend,H60,recommender_dispersed,100.0,48,49
+weekend,H60,oracle,100.0,38,38

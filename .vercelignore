@@ -1,0 +1,25 @@
+# Keep the deployment small. Everything the running app needs stays:
+#   api/, models/*.py, features/, recommendation/, evaluation/, data_collection/, utils/, configs/,
+#   data/processed/lpu_timeseries.csv, artifacts/pipelines/*.joblib, frontend/templates/, public/
+collab_content_backup/
+notebooks/
+docs/
+tests/
+experiments/
+scripts/
+models/weights/
+artifacts/figures/
+artifacts/error_analysis/
+artifacts/tuning/
+artifacts/pipelines/boosters/
+data/processed/*.parquet
+Dockerfile
+Dockerfile.gpu
+docker-compose.yml
+docker-compose.dev.yml
+docker-start.sh
+docker-start.bat
+DOCKER.md
+render.yaml
+requirements-full.txt
+requirements-render.txt

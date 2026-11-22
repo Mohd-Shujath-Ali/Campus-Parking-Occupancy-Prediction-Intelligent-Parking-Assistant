@@ -1,40 +1,24 @@
-# Core ML & Numerical Computing
-numpy>=1.26.0,<2.1.0
-pandas>=2.2.0
-scipy>=1.13.0
+# Lean, pinned runtime dependencies: exactly what the API, dashboards and forecasts need.
+# This is what hosted deployments (Vercel, Render) install; it keeps the bundle small enough for
+# serverless limits. For development, training, notebooks and server-side YOLO use requirements-full.txt.
+#
+# The versions are pinned because artifacts/pipelines/*.joblib are pickles built with them.
+# xgboost-cpu is the CPU-only build of XGBoost (same `import xgboost`, without ~200 MB of CUDA libraries).
 
-# Computer Vision & Deep Learning Inference
-ultralytics>=8.3.0
-torch>=2.2.0
-opencv-python-headless>=4.10.0.84
-shapely>=2.0.4
+# Web
+fastapi==0.163.2
+starlette==1.7.0
+uvicorn==0.54.0
+pydantic==2.13.5
+jinja2==3.1.6
+python-multipart==0.0.32
+slowapi==0.1.10
 
-# Supervised ML, Pipelines & Imbalance Handling
-scikit-learn>=1.5.0
-xgboost>=2.1.0
-imbalanced-learn>=0.12.0
-statsmodels>=0.14.2
-
-# Explainable AI & Visualization
-shap>=0.46.0
-matplotlib>=3.9.0
-seaborn>=0.13.2
-plotly>=5.24.0
-
-# Web Microservice, Templates & API
-fastapi>=0.115.0
-uvicorn[standard]>=0.32.0
-pydantic>=2.9.0
-jinja2>=3.1.4
-python-multipart>=0.0.12
-slowapi>=0.1.10
-
-# Data Serialization, Configuration, Quality
-pyyaml>=6.0.2
-joblib>=1.4.2
-pyarrow>=17.0.0
-
-# HTTP Utilities & Testing
-requests>=2.32.0
-pytest>=8.3.0
-httpx>=0.27.0
+# Data + ML
+numpy==2.5.3
+pandas==3.0.5
+scipy==1.18.1
+scikit-learn==1.9.1
+xgboost-cpu==3.4.1
+joblib==1.6.0
+pyyaml==6.0.3

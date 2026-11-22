@@ -1,0 +1,31 @@
+[project]
+name = "lpu-campus-parking"
+version = "2.0.0"
+description = "Campus parking occupancy prediction and intelligent parking assistant (FastAPI + XGBoost)"
+readme = "README.md"
+requires-python = ">=3.12,<3.14"
+# Mirrors requirements.txt (pinned: the model pickles in artifacts/pipelines were built with these versions).
+dependencies = [
+    "fastapi==0.163.2",
+    "starlette==1.7.0",
+    "uvicorn==0.54.0",
+    "pydantic==2.13.5",
+    "jinja2==3.1.6",
+    "python-multipart==0.0.32",
+    "slowapi==0.1.10",
+    "numpy==2.5.3",
+    "pandas==3.0.5",
+    "scipy==1.18.1",
+    "scikit-learn==1.9.1",
+    "xgboost-cpu==3.4.1",
+    "joblib==1.6.0",
+    "pyyaml==6.0.3",
+]
+
+[tool.uv]
+# This repository is an application made of several top-level packages, not an installable library.
+package = false
+
+[tool.vercel]
+# Vercel loads the FastAPI instance `app` from api/main.py
+entrypoint = "api.main:app"

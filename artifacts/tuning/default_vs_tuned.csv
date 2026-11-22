@@ -1,0 +1,5 @@
+Model,Split,MAE,RMSE,R2,MAPE
+Default (model_config.yaml),val,4.427,6.437,0.9914,26.37
+Default (model_config.yaml),test,4.214,5.705,0.9934,25.84
+Tuned (Bayesian (TPE)),val,4.057,6.289,0.9917,25.4
+Tuned (Bayesian (TPE)),test,3.684,4.948,0.9951,24.53

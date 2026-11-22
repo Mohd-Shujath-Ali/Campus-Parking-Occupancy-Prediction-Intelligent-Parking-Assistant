@@ -1,47 +1,77 @@
 import numpy as np
 import pandas as pd
-from typing import Dict, Any, Tuple
+from typing import Dict, Tuple
+
 
 class PersistenceForecaster:
     """
     Naive Baseline: y_hat(t+H) = y(t).
-    Essential lower-bound required by course rubric to quantify the value-add of ML models.
+    Lower bound that quantifies the value-add of the ML models.
     """
-    def __init__(self):
-        pass
 
     def fit(self, X: pd.DataFrame, y: pd.Series):
         return self
 
     def predict(self, X: pd.DataFrame) -> np.ndarray:
-        return X['vehicle_count'].values
+        return X["vehicle_count"].values
+
+
+class ProfileForecaster:
+    """
+    Normal-day baseline: y_hat(t+H) = profile(zone, time of week at t+H) x capacity.
+    Uses no live data at all, so it is also the fallback when a camera is stale or offline.
+    """
+
+    def __init__(self, horizon_key: str = "H15"):
+        self.horizon_key = horizon_key
+
+    def fit(self, X: pd.DataFrame, y: pd.Series):
+        return self
+
+    def predict(self, X: pd.DataFrame) -> np.ndarray:
+        from models.forecaster import profile_offset
+        return profile_offset(X, self.horizon_key)
+
+
+def _hour_day(df: pd.DataFrame) -> Tuple[np.ndarray, np.ndarray]:
+    """Recover integer hour-of-day / day-of-week from the sin/cos encodings."""
+    hour = np.round((np.arctan2(df["hour_sin"], df["hour_cos"]) / (2 * np.pi) * 24) % 24).astype(int) % 24
+    day = np.round((np.arctan2(df["day_sin"], df["day_cos"]) / (2 * np.pi) * 7) % 7).astype(int) % 7
+    return np.asarray(day), np.asarray(hour)
+
 
 class SeasonalHistoricalMeanForecaster:
     """
-    Seasonal Baseline: y_hat(t+H) = mean(y | zone, day_of_week, hour_bin).
-    Estimates typical weekly diurnal profile in absence of live camera inertia.
+    Seasonal Baseline: y_hat(t+H) = mean(y | zone, day_of_week, hour).
+
+    Zone-aware: each zone gets its own weekly profile, so a hostel lot is
+    never averaged with a campus gate. Falls back to the zone mean, then the
+    global mean, for unseen cells.
     """
+
     def __init__(self):
-        self.lookup_table: Dict[Tuple[int, int], float] = {}
+        self.lookup_table: Dict[Tuple[int, int, int], float] = {}
+        self.zone_means: Dict[int, float] = {}
+        self.global_mean = 0.0
 
     def fit(self, X: pd.DataFrame, y: pd.Series):
-        df = X.copy()
-        df['target'] = y.values
-        # Reconstruct hour and day from sin/cos or time
-        df['hour_approx'] = np.round((np.arctan2(df['hour_sin'], df['hour_cos']) / (2 * np.pi) * 24) % 24).astype(int)
-        df['day_approx'] = np.round((np.arctan2(df['day_sin'], df['day_cos']) / (2 * np.pi) * 7) % 7).astype(int)
-
-        grouped = df.groupby(['day_approx', 'hour_approx'])['target'].mean()
-        self.lookup_table = grouped.to_dict()
-        self.global_mean = float(y.mean())
+        day, hour = _hour_day(X)
+        df = pd.DataFrame({
+            "zone": X["zone_code"].values, "day": day, "hour": hour,
+            "target": np.asarray(y),
+        })
+        self.lookup_table = df.groupby(["zone", "day", "hour"])["target"].mean().to_dict()
+        self.zone_means = df.groupby("zone")["target"].mean().to_dict()
+        self.global_mean = float(df["target"].mean())
         return self
 
     def predict(self, X: pd.DataFrame) -> np.ndarray:
-        df = X.copy()
-        df['hour_approx'] = np.round((np.arctan2(df['hour_sin'], df['hour_cos']) / (2 * np.pi) * 24) % 24).astype(int)
-        df['day_approx'] = np.round((np.arctan2(df['day_sin'], df['day_cos']) / (2 * np.pi) * 7) % 7).astype(int)
-
-        # Vectorised lookup — eliminates O(n) iterrows() loop
-        keys = list(zip(df['day_approx'].tolist(), df['hour_approx'].tolist()))
-        preds = np.array([self.lookup_table.get(k, self.global_mean) for k in keys])
-        return preds
+        day, hour = _hour_day(X)
+        zones = X["zone_code"].values
+        return np.array([
+            self.lookup_table.get(
+                (int(z), int(d), int(h)),
+                self.zone_means.get(int(z), self.global_mean),
+            )
+            for z, d, h in zip(zones, day, hour)
+        ])

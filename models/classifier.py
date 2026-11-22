@@ -2,35 +2,40 @@ import numpy as np
 import pandas as pd
 from typing import Dict, Any, Tuple
 import xgboost as xgb
+from sklearn.calibration import CalibratedClassifierCV
+from sklearn.frozen import FrozenEstimator
+from utils.config import xgb_params
+from models.pipeline import build_pipeline
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score, average_precision_score
 
 class SaturationClassifier:
     """
     Dual-Head Secondary Guard: Predicts P(Occupancy >= 90% Capacity at t+H).
-    Handles class imbalance using scale_pos_weight or SMOTE inside training folds.
+    Handles class imbalance using scale_pos_weight.
     """
-    def __init__(self, n_estimators: int = 150, max_depth: int = 5, learning_rate: float = 0.05):
-        self.n_estimators = n_estimators
-        self.max_depth = max_depth
-        self.learning_rate = learning_rate
+    def __init__(self, **overrides):
+        # Defaults come from configs/model_config.yaml (xgboost_classifier)
+        self.params = {**xgb_params("xgboost_classifier"), **overrides}
         self.model = None
 
-    def fit(self, X_train: pd.DataFrame, y_train: pd.Series):
-        # Calculate class imbalance ratio
+    def fit(self, X_train: pd.DataFrame, y_train: pd.Series,
+            X_val: pd.DataFrame = None, y_val: pd.Series = None):
+        # Class imbalance handled with scale_pos_weight (neg/pos ratio). This
+        # improves recall but inflates raw probabilities, so when a validation
+        # period is supplied the scores are recalibrated (isotonic) on it.
         pos_count = (y_train == 1).sum()
         neg_count = (y_train == 0).sum()
         scale_pos_weight = float(neg_count / max(1, pos_count))
 
-        self.model = xgb.XGBClassifier(
-            n_estimators=self.n_estimators,
-            max_depth=self.max_depth,
-            learning_rate=self.learning_rate,
-            scale_pos_weight=scale_pos_weight,
-            objective="binary:logistic",
-            eval_metric="aucpr",
-            random_state=42
-        )
-        self.model.fit(X_train, y_train)
+        # Same preprocessing Pipeline as the regressors, persisted as one object
+        self.base = build_pipeline(
+            xgb.XGBClassifier(scale_pos_weight=scale_pos_weight, **self.params))
+        self.base.fit(X_train, y_train)
+        self.model = self.base
+        if X_val is not None:
+            # Validation is chronologically after training and before test: leak-free
+            self.model = CalibratedClassifierCV(
+                FrozenEstimator(self.base), method="isotonic").fit(X_val, y_val)
         return self
 
     def predict(self, X: pd.DataFrame) -> np.ndarray:

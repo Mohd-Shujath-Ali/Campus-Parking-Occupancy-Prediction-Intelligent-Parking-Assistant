@@ -1,0 +1,16 @@
+horizon,regime,rows,MAE,persistence_MAE,skill_vs_persistence_pct
+H15,normal weekday,18804,3.651,6.508,43.9
+H15,weekend,19428,3.03,3.7,18.1
+H15,event,2916,5.785,7.184,19.5
+H15,exam day,16836,3.586,7.089,49.4
+H15,holiday,6912,3.093,3.751,17.5
+H30,normal weekday,18804,4.4,10.782,59.2
+H30,weekend,19428,3.552,5.22,32.0
+H30,event,2916,7.658,11.931,35.8
+H30,exam day,16836,4.151,12.04,65.5
+H30,holiday,6912,3.679,5.309,30.7
+H60,normal weekday,18804,5.258,18.117,71.0
+H60,weekend,19428,4.026,7.955,49.4
+H60,event,2916,8.905,20.498,56.6
+H60,exam day,16836,4.618,20.36,77.3
+H60,holiday,6912,4.217,7.972,47.1

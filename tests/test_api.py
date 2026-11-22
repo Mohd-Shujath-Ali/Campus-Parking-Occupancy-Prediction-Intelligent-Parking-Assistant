@@ -6,8 +6,9 @@ import pytest
 from pathlib import Path
 from fastapi.testclient import TestClient
 from api.main import app
+from tests.auth_helpers import login_client
 
-client = TestClient(app)
+client = login_client()   # admin: these tests cover every endpoint
 
 
 # ─────────────────────────── Health ───────────────────────────
@@ -81,12 +82,20 @@ def test_prediction_invalid_zone():
 
 
 def test_prediction_invalid_horizon():
-    res = client.post("/api/predict", json={
-        "zone_id": "ZONE_BLOCK1",
-        "horizon_minutes": 45,   # only 15/30/60 allowed
-        "current_count": 50
-    })
-    assert res.status_code == 422
+    for bad in (4, 0, 61, 90):    # supported range is 5-60 minutes
+        res = client.post("/api/predict", json={"zone_id": "ZONE_BLOCK1", "horizon_minutes": bad, "current_count": 50})
+        assert res.status_code == 422, bad
+
+
+def test_prediction_arbitrary_horizon_is_interpolated():
+    """45 min is between the trained +30 and +60 models; the result must lie sensibly between them."""
+    got = {}
+    for h in (30, 45, 60):
+        r = client.post("/api/predict", json={"zone_id": "ZONE_MAINPARK_NORTH", "horizon_minutes": h, "current_count": 200,
+                                              "timestamp": "2026-11-17T09:00:00"})
+        assert r.status_code == 200, r.text
+        got[h] = r.json()["predicted_vehicle_count"]
+    assert min(got[30], got[60]) - 1 <= got[45] <= max(got[30], got[60]) + 1
 
 
 def test_prediction_negative_count():
@@ -171,6 +180,8 @@ def test_metrics_endpoint():
 # ─────────────────────────── YOLO Detection ───────────────────
 
 def test_detect_image_endpoint():
+    pytest.importorskip("cv2", reason="server-side detection needs OpenCV")
+    pytest.importorskip("ultralytics", reason="server-side detection needs ultralytics (requirements-full.txt)")
     test_imgs = list(Path("collab_content_backup/LPU---Parking-1/test/images").glob("*.jpg"))
     if not test_imgs:
         pytest.skip("No test images available")
@@ -204,6 +215,28 @@ def test_favicon_served():
     assert res.status_code == 200
     assert res.headers["content-type"] in ("image/x-icon", "image/vnd.microsoft.icon",
                                            "image/ico", "application/octet-stream")
+
+
+def test_explain_endpoint_is_additive():
+    r = client.get("/api/explain", params={"zone_id": "ZONE_BLOCK1", "current_count": 80,
+                                           "horizon_minutes": 15})
+    assert r.status_code == 200
+    d = r.json()
+    total = d["base_value"] + sum(c["effect_cars"] for c in d["top_contributions"]) + d["other_effect_cars"]
+    assert abs(total - d["prediction"]) < 0.5      # SHAP is additive (rounding only)
+    assert d["top_contributions"][0]["feature"]
+
+
+def test_explain_unknown_zone_404():
+    assert client.get("/api/explain", params={"zone_id": "NOPE", "current_count": 1}).status_code == 404
+
+
+def test_predict_returns_interval_containing_point_forecast():
+    r = client.post("/api/predict", json={"zone_id": "ZONE_BLOCK1", "current_count": 90,
+                                          "horizon_minutes": 30})
+    d = r.json()
+    assert d["predicted_low"] is not None
+    assert d["predicted_low"] <= d["predicted_vehicle_count"] <= d["predicted_high"]
 
 
 # ─────────────────────────── Anti-Herding & Navigation ────────
@@ -240,6 +273,7 @@ def test_shap_figure_whitelist_guard():
 
 def test_image_quality_assessment():
     import numpy as np
+    pytest.importorskip("cv2", reason="OpenCV is not installed in the slim runtime")
     from computer_vision.detection import assess_image_quality
 
     # Underexposed (black frame)
@@ -288,3 +322,23 @@ def test_navigate_capacity_cap():
         assert res.status_code in (200, 429)  # 200 within limit, or 429 once rate limit reached
         if res.status_code == 200:
             assert res.json()["active_in_flight_count"] <= 55
+
+
+# ─────────────────────────── Slim deployment (no OpenCV/Ultralytics) ───────────────────
+
+def test_server_side_vision_unavailable_degrades_gracefully(monkeypatch):
+    """On the slim serverless deployment YOLO runs in the browser; server endpoints must say so, not crash."""
+    import api.routes as routes
+    from io import BytesIO
+    monkeypatch.setattr(routes, "_server_vision", lambda: None)
+
+    health = client.get("/api/health")
+    assert health.status_code == 200
+    assert health.json()["yolo_model"]["loaded"] is False
+    assert "browser" in health.json()["yolo_model"]["note"]
+
+    jpg = {"file": ("f.jpg", BytesIO(b"\xff\xd8\xff"), "image/jpeg")}
+    r = client.post("/api/detect-frame", files=jpg)
+    assert r.status_code == 503 and "browser" in r.json()["detail"]
+    r = client.post("/api/detect-image", files={"file": ("f.jpg", BytesIO(b"\xff\xd8\xff"), "image/jpeg")})
+    assert r.status_code == 503
